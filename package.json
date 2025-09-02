@@ -1,20 +1,26 @@
 {
-  "name": "sql-connector",
-  "version": "1.0.0",
-  "main": "sql-connector.js",
+  "name": "@mlagie/sql-connector",
+  "version": "1.0.1",
+  "description": "Le module sql-connector permet de gérer les connexions à une base de données MySQL, de définir des schémas de tables, et d'interagir avec les données de manière simple et efficace.",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "mysql2": "^3.12.0",
-    "dotenv": "^16.4.5"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lagie-marin/sql-connector.git"
   },
-  "devDependencies": {
-    "chalk": "^5.3.0",
-    "dayjs": "^1.11.11"
+  "keywords": ["sql", "schema"],
+  "author": "lagie-marin",
+  "license": "MIT",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/lagie-marin/sql-connector/issues"
+  },
+  "homepage": "https://github.com/lagie-marin/sql-connector#readme",
+  "private": false,
+  "dependencies": {
+    "@mlagie/logger": "^1.0.0",
+    "mysql2": "^3.14.4"
   }
 }

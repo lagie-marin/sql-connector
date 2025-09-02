@@ -1,5 +1,5 @@
+const { logs, error, sql } = require("@mlagie/logger");
 const mysql = require("mysql2");
-const { error, logs, sql } = require("./Logger");
 let client = {};
 
 const sqlType = {
@@ -115,13 +115,46 @@ async function logout() {
  * const condition = generateCondition(filter, true);
  * console.log(condition); // 'id = 1, name = "John"'
  */
-function generateCondition(filter, isUpdate = false)
-{
+function generateCondition(filter, isUpdate = false, schema = null) {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
 
+    if (!isUpdate && schema && schema.schemaDict) {
+        const uniqueKeys = keys.filter(key => {
+            const field = schema.schemaDict[key];
+            return field && field.unique === true;
+        });
+
+        if (uniqueKeys.length > 0) {
+            return uniqueKeys.map(key => {
+                const value = filter[key];
+                if (Array.isArray(value)) {
+                    return `${key} IN (${value.map(v => `"${v}"`).join(", ")})`;
+                }
+                if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
+                    const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
+                    return `JSON_CONTAINS(${key}, '${jsonVal}')`;
+                }
+                if (value === null || value === "null") return `${key} IS NULL`;
+                return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
+            }).join(" AND ");
+        }
+    }
+
+    // Comportement par défaut
     const conditions = keys.map((key, index) => {
         const value = values[index];
+
+        if (Array.isArray(value)) {
+            return `${key} IN (${value.map(v => `"${v}"`).join(", ")})`;
+        }
+        if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
+            const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
+            if (isUpdate) {
+                return `${key} = '${jsonVal}'`;
+            }
+            return `JSON_CONTAINS(${key}, '${jsonVal}')`;
+        }
 
         if ((value === null || value === "null") && isUpdate == false) return `${key} IS NULL`;
         return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
@@ -142,10 +175,14 @@ function formatObject(obj) {
     for (const key in obj) {
         if (obj.hasOwnProperty(key)) {
             const value = obj[key];
-            if (typeof value === "string")
-                obj[key] = `${value.replace(/"/g, '\\"')}`;
-            if (typeof value === "object")
-                obj[key] = `${value}`;
+            if (typeof value === "string") {
+                obj[key] = value.replace(/"/g, '\\"');
+            }
+            if (typeof value === "object") {
+                obj[key] = JSON.stringify(value)
+                    .replace(/"/g, '\\"')
+                    .replace(/'/g, "\\'");
+            }
         }
     }
     return obj;
@@ -213,6 +250,8 @@ function getFieldType(field) {
  */
 class Model {
     static sqlTypeMap = sqlTypeMap;
+    static pendingModels = [];
+
     /**
      * Creates an instance of Model.
      * @param {string} name The name of the database table.
@@ -221,14 +260,63 @@ class Model {
     constructor(name, schema) {
         this.name = name;
         this.schema = schema;
+        // Ajoute le modèle à la liste d'attente pour la création différée
+        Model.pendingModels.push(this);
+    }
 
-        connexion.query(this.generateCreateTableStatement(schema.schemaDict), (err) => {
-            if (err) {
-                error(`Error creating table: ${err} with table name: ${this.name}`);
-                return;
+    /**
+     * Crée toutes les tables dans l'ordre correct en fonction des foreign keys.
+     * @returns {Promise<void>}
+     */
+    static async createAllTables() {
+        // Dépendances : {table: [tables dont elle dépend]}
+        const dependencies = {};
+        const modelMap = {};
+        for (const model of Model.pendingModels) {
+            modelMap[model.name] = model;
+            dependencies[model.name] = [];
+            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                if (field && field.foreignKey) {
+                    // field.foreignKey peut être "autreTable(colonne)"
+                    const refTable = field.foreignKey.split('(')[0].trim();
+                    dependencies[model.name].push(refTable);
+                }
             }
-            logs(`La table ${this.name} a été créé`);
-        });
+        }
+
+        // Tri topologique
+        const sorted = [];
+        const visited = {};
+        function visit(table) {
+            if (visited[table] === true) return;
+            if (visited[table] === 'temp') throw new Error('Cyclic foreign key dependency detected');
+            visited[table] = 'temp';
+            for (const dep of dependencies[table]) {
+                if (modelMap[dep]) visit(dep);
+            }
+            visited[table] = true;
+            sorted.push(table);
+        }
+        for (const table of Object.keys(dependencies)) {
+            if (!visited[table]) visit(table);
+        }
+
+        // Création des tables dans l'ordre
+        for (const table of sorted) {
+            const model = modelMap[table];
+            await new Promise((resolve, reject) => {
+                connexion.query(model.generateCreateTableStatement(model.schema.schemaDict), (err) => {
+                    if (err) {
+                        error(`Error creating table: ${err} with table name: ${model.name}`);
+                        return reject(err);
+                    }
+                    logs(`La table ${model.name} a été créé`);
+                    resolve();
+                });
+            });
+        }
+        // Vide la liste d'attente
+        Model.pendingModels = [];
     }
 
     /**
@@ -244,7 +332,7 @@ class Model {
             let lengthDefault = 255;
 
             if (!field.type && typeof field == "object") throw new Error(`Field ${fieldName} has no type defined.`);
-            
+
             const fieldType = getFieldType(field);
 
             if (field.type && typeof field == "object") {
@@ -293,6 +381,45 @@ class Model {
     }
 
     /**
+     * Récupère plusieurs entrées de la table.
+     * @param {Object} [options] - Options de requête (attributs, where, order, limit).
+     * @param {string[]} [options.attributes] - Champs à retourner.
+     * @param {Object} [options.where] - Filtres (clé/valeur).
+     * @param {Array} [options.order] - Ex: [['points', 'DESC']]
+     * @param {number} [options.limit] - Limite de résultats.
+     * @returns {Promise<Array<Object>>}
+     */
+    async findAll(options = {}) {
+        const {
+            attributes = ['*'],
+            where = undefined,
+            order = undefined,
+            limit = undefined
+        } = options;
+
+        let sql_request = `SELECT ${attributes.join(', ')} FROM ${this.name}`;
+        if (where) {
+            sql_request += ` WHERE ${generateCondition(formatObject(where))}`;
+        }
+        if (order && Array.isArray(order) && order.length > 0) {
+            const orderStr = order.map(([col, dir]) => `${col} ${dir}`).join(', ');
+            sql_request += ` ORDER BY ${orderStr}`;
+        }
+        if (limit) {
+            sql_request += ` LIMIT ${limit}`;
+        }
+
+        return new Promise((resolve, reject) => {
+            connexion.promise().query(sql_request).then(([rows]) => {
+                resolve(rows);
+            }).catch((err) => {
+                error(`Error executing findAll: ${err}`);
+                resolve([]);
+            });
+        });
+    }
+
+    /**
      * Finds a unique entry in the database table based on the filter provided.
      * @param {Object} filter An object containing the key-value pairs to use to generate the search condition.
      * @param {string[]} [fields=["*"]] An array of field names to return in the result.
@@ -305,7 +432,7 @@ class Model {
             connexion.promise().query(sql_request).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0])[0]));
+                resolve(new ModelInstance(this.name, Object.values(rows[0])[0], this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return 0;
@@ -337,12 +464,12 @@ class Model {
      */
     async find(filter, fields = ["*"]) {
         const sql_request = `SELECT ${fields.join(", ")} FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
-        
+
         return new Promise((resolve, reject) => {
             connexion.promise().query(sql_request).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0])));
+                resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;
@@ -366,12 +493,11 @@ class Model {
      * @throws {Error} Throws an error if query execution fails.
      */
     async customRequest(custom) {
-        console.log(custom);
         return new Promise(async (resolve, reject) => {
             await connexion.promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0])));
+                resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;
@@ -446,7 +572,7 @@ class Model {
      *
      * @throws {Error} If there is an error executing the SQL_request query.
      */
-    async generate_uuid(var_uuid="uuid") {
+    async generate_uuid(var_uuid = "uuid") {
         const uuid = (await connexion.promise().query("SELECT UUID();"))[0][0]["UUID()"];
         const sql_request = `SELECT COUNT(*) FROM ${this.name} WHERE ${var_uuid}="${uuid}";`;
 
@@ -471,8 +597,9 @@ class ModelInstance {
      * Creates an instance of ModelInstance.
      * @param {string} name The name of the database table.
      * @param {Object} data The instance data.
+     * @param {Object|null} [schema=null] The schema for the instance, if available.
      */
-    constructor(name, data) {
+    constructor(name, data, schema = null) {
         /**
          * The name of the database table.
          * @type {string}
@@ -484,6 +611,12 @@ class ModelInstance {
          * @type {Object}
          */
         this.data = data;
+
+        /**
+         * The schema for the instance.
+         * @type {Object|null}
+         */
+        this.schema = schema;
     }
 
     /**
@@ -494,7 +627,7 @@ class ModelInstance {
      * @throws {Error} Throws an error if the update fails.
      */
     async updateOne(model) {
-        const sql_request = `UPDATE ${this.name} SET ${generateCondition(formatObject(model), true)} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data))}`;
+        const sql_request = `UPDATE ${this.name} SET ${generateCondition(formatObject(model), true)} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data), false, this.schema)}`;
 
         await connexion.promise().query(sql_request).catch((err) => {
             error(`Error executing query: ${err}`);
@@ -514,7 +647,27 @@ class ModelInstance {
 
         return new Promise((resolve, reject) => {
             connexion.promise().query(sql_request).then((rows) => {
-                
+
+                if (rows[1] != undefined) return resolve(0);
+
+                resolve(1);
+            }).catch((err) => {
+                error(`Error executing query: ${err}`);
+                return 0;
+            });
+        });
+    }
+
+    /**
+     * Deletes a single entry in the database table based on the instance data.
+     * @returns {Promise<number>} A promise that resolves to the number of rows deleted.
+     * @throws {Error} Throws an error if the deletion fails.
+     */
+    async deleteOne() {
+        const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data))}`;
+
+        return new Promise((resolve, reject) => {
+            connexion.promise().query(sql_request).then((rows) => {
                 if (rows[1] != undefined) return resolve(0);
 
                 resolve(1);
@@ -536,7 +689,7 @@ class ModelInstance {
             await connexion.promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0])));
+                resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;

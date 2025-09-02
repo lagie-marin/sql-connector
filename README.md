@@ -78,9 +78,12 @@ Représente un modèle de base de données.
     * `delete(filter)` : Supprime une entrée de la table.
     * `dropTable()` : Supprime la table si elle existe.
     * `generate_uuid()` : Génère un UUID unique pour le modèle.
+    * `createAllTables()` : **Crée toutes les tables dans le bon ordre selon les dépendances de clés étrangères.** (statique)
 * ### Exemple
 ```javascript
 const userModel = new Model('users', transferSchema);
+// Après avoir instancié tous les modèles :
+await Model.createAllTables(); // Crée toutes les tables dans le bon ordre
 
 // Sauvegarder des données
 await userModel.save({ token: 'abc123', mdp: 'password' });
