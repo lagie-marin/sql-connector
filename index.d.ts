@@ -21,6 +21,8 @@ export interface SchemaField {
     unique?: boolean;
     auto_increment?: boolean;
     foreignKey?: string;
+    enum?: string[];
+    primary_key?: boolean;
     customize?: string;
 }
 

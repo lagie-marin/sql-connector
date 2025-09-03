@@ -165,8 +165,9 @@ function generateCondition(filter, isUpdate = false, schema = null) {
 
 function generateValueSQL(value) {
     return value.map(item => {
+        if (item === null) return 'NULL';
         if (typeof item === "string") return `"${item.replace(/"/g, '\\"')}"`;
-        if (typeof item === "object") return `"${item}"`;
+        if (typeof item === "object" && item !== null) return `"${item}"`;
         return item;
     }).join(", ");
 }
@@ -236,10 +237,11 @@ function ifReservedKeywords(tableName) {
 
 function getFieldType(field) {
     if (typeof field === "object") {
-        if (field.type.name !== undefined) return field.type.name;
-        else return field.type;
+        if (field.type && field.type.name !== undefined) return field.type.name;
+        else if (field.type !== undefined) return field.type;
+        return undefined;
     } else {
-        if (field.name !== undefined) return field.name;
+        if (field && field.name !== undefined) return field.name;
         else return field;
     }
 }
@@ -331,14 +333,20 @@ class Model {
             const field = schema[fieldName];
             let lengthDefault = 255;
 
-            if (!field.type && typeof field == "object") throw new Error(`Field ${fieldName} has no type defined.`);
+            if (!field.type && typeof field == "object" && !(Array.isArray(field.enum) && field.enum.length > 0)) throw new Error(`Field ${fieldName} has no type defined.`);
 
             const fieldType = getFieldType(field);
 
             if (field.type && typeof field == "object") {
-                if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
-
-                let columnDefinition = `${fieldName} ${sqlTypeMap[fieldType]}${sqlTypeMap[fieldType] == "VARCHAR" || sqlTypeMap[fieldType] == "INT" ? `(${field.length > 0 ? field.length : lengthDefault})` : ""}`;
+                // Si c'est un enum, ne pas vérifier sqlTypeMap
+                let columnDefinition = "";
+                if (Array.isArray(field.enum) && field.enum.length > 0) {
+                    const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
+                    columnDefinition = `${fieldName} ENUM(${enumValues})`;
+                } else {
+                    if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
+                    columnDefinition = `${fieldName} ${sqlTypeMap[fieldType]}${sqlTypeMap[fieldType] == "VARCHAR" || sqlTypeMap[fieldType] == "INT" ? `(${field.length > 0 ? field.length : lengthDefault})` : ""}`;
+                }
 
                 if (field.required) columnDefinition += ' NOT NULL';
                 if (field.default !== undefined && field.default != null) columnDefinition += ` DEFAULT "${field.default}"`;
@@ -346,8 +354,14 @@ class Model {
                 if (field.unique) columnDefinition += ' UNIQUE';
                 if (field.auto_increment) columnDefinition += ' AUTO_INCREMENT';
                 if (field.foreignKey) foreignKey.push(`FOREIGN KEY (${fieldName}) REFERENCES ${field.foreignKey}`);
+                if (field.primary_key) columnDefinition += ' PRIMARY KEY';
                 if (typeof field.customize === 'string' && field.customize.length != 0) columnDefinition += ` ${field.customize}`;
                 return columnDefinition;
+            }
+
+            if (Array.isArray(field.enum) && field.enum.length > 0) {
+                const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
+                return `${fieldName} ENUM(${enumValues})`;
             }
 
             if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${field}`);

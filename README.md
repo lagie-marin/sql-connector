@@ -42,25 +42,66 @@ await connect(config);
 await logout();
 ```
 
+### Interface `SchemaField`
+
+Décrit les propriétés d'un champ dans le schéma d'une table SQL. Chaque clé du dictionnaire passé au constructeur de `Schema` doit respecter cette interface.
+
+| Propriété        | Type                                 | Description                                                                 |
+|------------------|--------------------------------------|-----------------------------------------------------------------------------|
+| type             | `SqlType` ou `{ name: SqlType }`     | Type du champ (String, Number, Boolean, etc.)                               |
+| length           | `number`                             | Longueur maximale (pour VARCHAR ou INT)                                     |
+| required         | `boolean`                            | Si le champ est obligatoire (NOT NULL)                                      |
+| default          | `any`                                | Valeur par défaut                                                           |
+| unique           | `boolean`                            | Si le champ doit être unique                                                |
+| auto_increment   | `boolean`                            | Si le champ est auto-incrémenté                                             |
+| foreignKey       | `string`                             | Clé étrangère (ex: "otherTable(column)")                                   |
+| enum             | `string[]`                           | Liste de valeurs pour un champ ENUM                                         |
+| primary_key      | `boolean`                            | Si le champ est une clé primaire                                            |
+| customize        | `string`                             | Ajout d'options SQL personnalisées                                          |
+
+#### Exemple d'utilisation
+
+```javascript
+const userSchema = new Schema({
+    status: {
+        type: String,
+        enum: ["active", "inactive", "pending"], // champ ENUM
+        required: true,
+        default: "pending"
+    },
+    id: {
+        type: Number,
+        auto_increment: true,
+        primary_key: true
+    },
+    email: {
+        type: String,
+        length: 255,
+        unique: true,
+        required: true
+    }
+});
+```
+
 ### Classes `Schema`
 
 Représente un schéma de base de données.
 * Constructeur:
-    * Schema(schemaDict) : Crée une instance de Schema.
-        * schemaDict (Object) : Un dictionnaire définissant le schéma.
+        * Schema(schemaDict) : Crée une instance de Schema.
+                * schemaDict (Object) : Un dictionnaire définissant le schéma.
 
 * Exemple
 
 ```javascript
 const transferSchema = new Schema({
-  token: {
-    type: String,
-    length: 50
-  },
-  mdp: {
-    type: String,
-    length: 15
-  }
+    token: {
+        type: String,
+        length: 50
+    },
+    mdp: {
+        type: String,
+        length: 15
+    }
 });
 ```
 ## Class Model
