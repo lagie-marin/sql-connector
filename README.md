@@ -1,3 +1,7 @@
+# sql-connector
+<img src="https://api.visitorbadge.io/api/VisitorHit?user=lagie-marin&repo=sql-connector-badge&countColor=%237B1E7A" height="20px"/> ![GitHub package.json version](https://img.shields.io/github/package-json/v/lagie-marin/sql-connector?color=#008000) ![NPM Downloads](https://img.shields.io/npm/d18m/%40mlagie%2Fsql-connector?color=#008000) ![NPM Downloads](https://img.shields.io/npm/dw/%40mlagie%2Fsql-connector?color=#008000) ![GitHub followers](https://img.shields.io/github/followers/lagie-marin?style=plastic&color=color%3D%23008000) ![GitHub repo size](https://img.shields.io/github/repo-size/lagie-marin/sql-connector?color=%green)
+ ![GitHub last commit](https://img.shields.io/github/last-commit/lagie-marin/sql-connector) ![GitHub forks](https://img.shields.io/github/forks/lagie-marin/sql-connector?style=plastic&color=%green)
+
 # Documentation du module `sql-connector`
 
 Le module `sql-connector` permet de gérer les connexions à une base de données MySQL, de définir des schémas de tables, et d'interagir avec les données de manière simple et efficace.
@@ -104,6 +108,59 @@ const transferSchema = new Schema({
     }
 });
 ```
+
+## Synchronisation automatique du schéma et gestion des migrations
+
+### Ajout, suppression et renommage de colonnes
+
+- **Ajout automatique de colonnes**  
+  Lorsque vous ajoutez un champ dans le schéma JS, la colonne correspondante est automatiquement ajoutée dans la base de données lors de la synchronisation avec :
+  ```js
+  await Model.syncAllTables();
+  ```
+
+- **Suppression automatique de colonnes**  
+  Si vous retirez un champ du schéma JS, la colonne reste dans la base par défaut.  
+  Pour supprimer automatiquement les colonnes disparues, utilisez :
+  ```js
+  await Model.syncAllTables({ dangerousSync: true });
+  ```
+  ⚠️ Attention, cela supprime les données de ces colonnes.
+
+- **Renommage de colonne sans perte de données**  
+  Pour renommer une colonne, ajoutez la propriété `oldName` dans le schéma :
+  ```js
+  const userSchema = new Schema({
+      role: { type: String, oldName: "rang" }
+  });
+  ```
+  Lors de la synchronisation, la colonne SQL sera renommée sans perte de données.  
+  Un avertissement s’affichera pour vous rappeler de retirer `oldName` du schéma après migration.
+
+### Suppression et sauvegarde des tables orphelines
+
+- Si une table SQL n’a plus de schéma JS associé, elle est supprimée automatiquement lors de la synchronisation.
+- **Avant suppression**, un fichier de backup SQL (INSERTs) est généré dans le dossier courant (ex : `backup_MaTable_1690000000000.sql`).
+
+### Restauration et gestion des backups
+
+- Si une table supprimée réapparaît dans le schéma, le module détecte la présence d’un backup et propose :
+  1. **De restaurer les données** (exécution du fichier SQL).
+  2. **De supprimer le backup** après restauration ou non.
+  3. Si vous refusez la suppression, le backup est renommé en `.ignored` et ne sera plus proposé.
+
+#### Exemple d’utilisation
+
+```js
+// Synchronisation simple (ajout/renommage de colonnes, suppression de tables orphelines avec backup)
+await Model.syncAllTables();
+
+// Synchronisation avec suppression automatique des colonnes disparues
+await Model.syncAllTables({ dangerousSync: true });
+```
+
+---
+
 ## Class Model
 Représente un modèle de base de données.
 * ### Constructeur :

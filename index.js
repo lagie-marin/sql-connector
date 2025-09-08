@@ -4,6 +4,7 @@ const { connect, logout } = require("./src/db/connect");
 const {Schema} = require("./src/models/Schema");
 const { sqlType } = require("./src/utils/sqlType");
 const { sqlTypeMap } = require("./src/utils/sqlTypeMap");
-const client = require("./client");
+
+let client = {};
 
 module.exports = { client, connect, logout, Schema, Model, ModelInstance, sqlType, sqlTypeMap }

@@ -98,7 +98,7 @@ export class Model {
      * Crée toutes les tables dans l'ordre correct en fonction des foreign keys.
      * @returns {Promise<void>}
      */
-    static createAllTables(): Promise<void>;
+    static syncAllTables({ dangerousSync = false } = {}): Promise<void>;
     /**
      * Saves data to the database table.
      * @param {Object} data The data to insert into the table.

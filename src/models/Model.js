@@ -1,4 +1,6 @@
 const { logs, error, sql } = require("@mlagie/logger");
+const { sqlTypeMap } = require("../utils/sqlTypeMap");
+const { getConnexion } = require("../db/connexion");
 
 function getFieldType(field) {
     if (typeof field === "object") {
@@ -18,6 +20,50 @@ function generateValueSQL(value) {
         if (typeof item === "object" && item !== null) return `"${item}"`;
         return item;
     }).join(", ");
+}
+
+const reservedKeywords = ['ADD', 'ALL', 'ALTER', 'AND', 'AS', 'ASC', 'BETWEEN', 'BY', 'CASE', 'CHECK', 'COLUMN', 'CONSTRAINT', 'CREATE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'DEFAULT', 'DELETE', 'DESC', 'DISTINCT', 'DROP', 'ELSE', 'END', 'ESCAPE', 'EXCEPT', 'EXISTS', 'FOR', 'FOREIGN', 'FROM', 'FULL', 'GROUP', 'HAVING', 'IN', 'INNER', 'INSERT', 'INTERSECT', 'INTO', 'IS', 'JOIN', 'LEFT', 'LIKE', 'LIMIT', 'NOT', 'NULL', 'ON', 'OR', 'ORDER', 'OUTER', 'PRIMARY', 'REFERENCES', 'RIGHT', 'SELECT', 'SET', 'SOME', 'TABLE', 'THEN', 'UNION', 'UNIQUE', 'UPDATE', 'VALUES', 'WHEN', 'WHERE'];
+
+/**
+ * Checks if a table name is a reserved keyword.
+ * 
+ * @param {string} tableName Le nom de la table à vérifier.
+ * @returns {boolean} `true` si le nom de la table est un mot-clé réservé, sinon `false`.
+ * 
+ * @example
+ * const isReserved = ifReservedKeywords('SELECT');
+ * console.log(isReserved); // true
+ *
+ * @example
+ * const isReserved = ifReservedKeywords('myTable');
+ * console.log(isReserved); // false
+ */
+function ifReservedKeywords(tableName) {
+    if (reservedKeywords.includes(tableName.toUpperCase())) {
+        return true;
+    }
+    return false;
+}
+
+function getColumnDefinition(fieldName, field) {
+    const fieldType = getFieldType(field);
+    let colDef = "";
+
+    if (Array.isArray(field.enum) && field.enum.length > 0) {
+        const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
+        colDef = `ENUM(${enumValues})`;
+    } else {
+        if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
+        colDef = `${sqlTypeMap[fieldType]}${(sqlTypeMap[fieldType] == "VARCHAR" || sqlTypeMap[fieldType] == "INT") ? `(${field.length > 0 ? field.length : 255})` : ""}`;
+    }
+    if (field.required) colDef += ' NOT NULL';
+    if (field.default !== undefined && field.default != null) colDef += ` DEFAULT "${field.default}"`;
+    if (field.default === null) colDef += ` DEFAULT NULL`;
+    if (field.unique) colDef += ' UNIQUE';
+    if (field.auto_increment) colDef += ' AUTO_INCREMENT';
+    if (field.primary_key) colDef += ' PRIMARY KEY';
+    if (typeof field.customize === 'string' && field.customize.length != 0) colDef += ` ${field.customize}`;
+    return colDef;
 }
 
 /**
@@ -41,24 +87,32 @@ class Model {
     }
 
     /**
-     * Crée toutes les tables dans l'ordre correct en fonction des foreign keys.
+     * Synchronise toutes les tables avec leur schéma JS (création + ajout des colonnes manquantes).
      * @returns {Promise<void>}
      */
-    static async createAllTables() {
+    static async syncAllTables({ dangerousSync = false } = {}) {
+        const fs = require('fs');
+        const path = require('path');
+        const glob = require('glob');
+
         // Dépendances : {table: [tables dont elle dépend]}
         const dependencies = {};
         const modelMap = {};
         for (const model of Model.pendingModels) {
             modelMap[model.name] = model;
             dependencies[model.name] = [];
-            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+            for (const [_, field] of Object.entries(model.schema.schemaDict)) {
                 if (field && field.foreignKey) {
-                    // field.foreignKey peut être "autreTable(colonne)"
                     const refTable = field.foreignKey.split('(')[0].trim();
                     dependencies[model.name].push(refTable);
                 }
             }
         }
+
+        // Récupère toutes les tables existantes dans la base
+        const conn = getConnexion();
+        const [dbTablesRows] = await conn.promise().query("SHOW TABLES");
+        const dbTables = dbTablesRows.map(row => Object.values(row)[0]);
 
         // Tri topologique
         const sorted = [];
@@ -77,19 +131,151 @@ class Model {
             if (!visited[table]) visit(table);
         }
 
-        // Création des tables dans l'ordre
+        // --- Détruit les tables qui n'ont plus de schéma ---
+        for (const dbTable of dbTables) {
+            if (!modelMap[dbTable]) {
+                try {
+                    const backupPath = `./backup_${dbTable}_${Date.now()}.sql`;
+                    // Sauvegarde rapide en SQL (INSERTs)
+                    const [rows] = await conn.promise().query(`SELECT * FROM \`${dbTable}\``);
+                    if (rows.length > 0) {
+                        const columns = Object.keys(rows[0]).map(col => `\`${col}\``).join(', ');
+                        const values = rows.map(row =>
+                            '(' + Object.values(row).map(val =>
+                                val === null ? 'NULL' : conn.escape(val)
+                            ).join(', ') + ')'
+                        ).join(',\n');
+                        const insertSQL = `INSERT INTO \`${dbTable}\` (${columns}) VALUES${values};\n`;
+                        fs.writeFileSync(backupPath, insertSQL, 'utf-8');
+                        logs(`Sauvegarde SQL de la table '${dbTable}' effectuée dans '${backupPath}'.`);
+                    } else {
+                        fs.writeFileSync(backupPath, '', 'utf-8');
+                        logs(`Table '${dbTable}' vide, fichier '${backupPath}' créé.`);
+                    }
+                } catch (err) {
+                    error(`Erreur lors de la sauvegarde SQL de la table '${dbTable}': ${err}`);
+                }
+                logs(`Table '${dbTable}' n'a plus de schéma associé, suppression...`);
+                await conn.promise().query(`DROP TABLE IF EXISTS \`${dbTable}\``);
+                logs(`Table '${dbTable}' supprimée.`);
+            }
+        }
+
+        // Création/synchronisation des tables dans l'ordre
         for (const table of sorted) {
             const model = modelMap[table];
-            await new Promise((resolve, reject) => {
-                connexion.query(model.generateCreateTableStatement(model.schema.schemaDict), (err) => {
-                    if (err) {
-                        error(`Error creating table: ${err} with table name: ${model.name}`);
-                        return reject(err);
-                    }
-                    logs(`La table ${model.name} a été créé`);
-                    resolve();
+
+            // 1. Crée la table si elle n'existe pas (version avec promesses)
+            try {
+                await conn.promise().query(model.generateCreateTableStatement(model.schema.schemaDict));
+                await logs(`La table ${model.name} a été créée ou existe déjà`);
+            } catch (err) {
+                error(`Error creating table: ${err} with table name: ${model.name}`);
+                throw err;
+            }
+
+            // --- Restauration automatique si backup SQL trouvé ---
+            const backupPattern = `./backup_${model.name}_*.sql`;
+            const backupFiles = glob.sync(backupPattern).filter(f => !f.endsWith('.ignored'));
+            if (backupFiles.length > 0) {
+                const latestBackup = backupFiles.sort().reverse()[0];
+                const readline = require('readline');
+                const rl = readline.createInterface({
+                    input: process.stdin,
+                    output: process.stdout
                 });
-            });
+
+                // Demande restauration
+                const answer = await new Promise((resolve) => {
+                    rl.question(
+                        `Un backup a été trouvé pour la table '${model.name}' (${latestBackup}). Voulez-vous restaurer les données ? (y/N) `,
+                        (answer) => {
+                            resolve(answer.trim().toLowerCase());
+                        }
+                    );
+                });
+
+                if (answer === 'y') {
+                    try {
+                        const sqlContent = fs.readFileSync(latestBackup, 'utf-8');
+                        await conn.promise().query(sqlContent);
+                        await logs(`Backup restauré pour la table '${model.name}'.`);
+                    } catch (err) {
+                        error(`Erreur lors de la restauration du backup pour '${model.name}': ${err}`);
+                    }
+                }
+
+                // Toujours demander la suppression après restauration ou non
+                await new Promise((resolve) => {
+                    rl.question(
+                        `Voulez-vous supprimer le fichier de backup '${latestBackup}' ? (y/N) `,
+                        (delAnswer) => {
+                            if (delAnswer.trim().toLowerCase() === 'y') {
+                                fs.unlinkSync(latestBackup);
+                                logs(`Backup supprimé : ${latestBackup}`);
+                            } else {
+                                // Renomme le fichier pour ne plus proposer la restauration
+                                fs.renameSync(latestBackup, latestBackup + '.ignored');
+                                logs(`Backup ignoré pour la table '${model.name}'. Il ne sera plus proposé.`);
+                            }
+                            rl.close();
+                            resolve();
+                        }
+                    );
+                });
+            }
+
+            // 2. Synchronise les colonnes (renommage, ajout, suppression)
+            const [columns] = await conn.promise().query(
+                `SHOW COLUMNS FROM \`${model.name}\``
+            );
+            let existingCols = columns.map(col => col.Field);
+
+            // --- Warn si oldName est présent dans le schéma ---
+            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                if (field.oldName) {
+                    logs(`⚠️  Pensez à retirer la propriété 'oldName' du champ '${fieldName}' dans le schéma JS de '${model.name}' pour éviter des renommages inutiles à l'avenir.`);
+                }
+            }
+
+            // --- Étape 1 : Renommage des colonnes ---
+            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                if (field.oldName && existingCols.includes(field.oldName) && !existingCols.includes(fieldName)) {
+                    // Génère la définition SQL de la nouvelle colonne
+                    let colDef = getColumnDefinition(fieldName, field);
+
+                    // Renomme la colonne
+                    const alterSQL = `ALTER TABLE \`${model.name}\` CHANGE COLUMN \`${field.oldName}\` \`${fieldName}\` ${colDef}`;
+                    await conn.promise().query(alterSQL);
+                    logs(`Colonne ${field.oldName} renommée en ${fieldName} dans ${model.name}`);
+                    // Mets à jour existingCols pour la suite
+                    existingCols = existingCols.map(col => col === field.oldName ? fieldName : col);
+                }
+            }
+
+            // --- Étape 2 : Ajout des colonnes manquantes ---
+            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                if (!existingCols.includes(fieldName)) {
+                    let colDef = getColumnDefinition(fieldName, field);
+
+                    // Ajoute la colonne
+                    const alterSQL = `ALTER TABLE \`${model.name}\` ADD COLUMN \`${fieldName}\` ${colDef}`;
+                    await conn.promise().query(alterSQL);
+                    logs(`Colonne ${fieldName} ajoutée à ${model.name}`);
+                    existingCols.push(fieldName);
+                }
+            }
+
+            // --- Étape 3 : Suppression des colonnes orphelines (dangerousSync) ---
+            if (dangerousSync) {
+                for (const col of existingCols) {
+                    if (!Object.keys(model.schema.schemaDict).includes(col)) {
+                        const alterSQL = `ALTER TABLE \`${model.name}\` DROP COLUMN \`${col}\``;
+                        await conn.promise().query(alterSQL);
+                        logs(`Colonne ${col} supprimée de ${model.name}`);
+                    }
+                }
+            }
         }
         // Vide la liste d'attente
         Model.pendingModels = [];
@@ -113,26 +299,8 @@ class Model {
 
             if (field.type && typeof field == "object") {
                 // Si c'est un enum, ne pas vérifier sqlTypeMap
-                let columnDefinition = "";
-                if (Array.isArray(field.enum) && field.enum.length > 0) {
-                    const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
-                    columnDefinition = `${fieldName} ENUM(${enumValues})`;
-                } else {
-                    if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
-                    columnDefinition = `${fieldName} ${sqlTypeMap[fieldType]}${sqlTypeMap[fieldType] == "VARCHAR" || sqlTypeMap[fieldType] == "INT" ? `(${field.length > 0 ? field.length : lengthDefault})` : ""}`;
-                }
-
-                if (field.required) columnDefinition += ' NOT NULL';
-                if (field.default !== undefined && field.default != null) columnDefinition += ` DEFAULT "${field.default}"`;
-                if (field.default === null) columnDefinition += ` DEFAULT NULL`;
-                if (field.unique) columnDefinition += ' UNIQUE';
-                if (field.auto_increment) columnDefinition += ' AUTO_INCREMENT';
-                if (field.foreignKey) foreignKey.push(`FOREIGN KEY (${fieldName}) REFERENCES ${field.foreignKey}`);
-                if (field.primary_key) columnDefinition += ' PRIMARY KEY';
-                if (typeof field.customize === 'string' && field.customize.length != 0) columnDefinition += ` ${field.customize}`;
-                return columnDefinition;
+                return getColumnDefinition(fieldName, field);
             }
-
             if (Array.isArray(field.enum) && field.enum.length > 0) {
                 const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
                 return `${fieldName} ENUM(${enumValues})`;
@@ -160,7 +328,7 @@ class Model {
         const sql_request = `INSERT INTO ${this.name} (${keys.join(', ')}) VALUES (${generateValueSQL(Object.values(data))})`;
         sql(this.name, sql_request);
         try {
-            const result = await connexion.promise().query(sql_request);
+            const result = await getConnexion().promise().query(sql_request);
             return result;
         } catch (err) {
             error(`Error inserting data into ${this.name}: ${err}`);
@@ -198,7 +366,7 @@ class Model {
         }
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then(([rows]) => {
+            getConnexion().promise().query(sql_request).then(([rows]) => {
                 resolve(rows);
             }).catch((err) => {
                 error(`Error executing findAll: ${err}`);
@@ -217,7 +385,7 @@ class Model {
         const sql_request = `SELECT ${fields.join(", ")} FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
                 resolve(new ModelInstance(this.name, Object.values(rows[0])[0], this.schema));
@@ -254,7 +422,7 @@ class Model {
         const sql_request = `SELECT ${fields.join(", ")} FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
                 resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
@@ -282,7 +450,7 @@ class Model {
      */
     async customRequest(custom) {
         return new Promise(async (resolve, reject) => {
-            await connexion.promise().query(custom).then((rows) => {
+            await getConnexion().promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
                 resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
@@ -307,7 +475,7 @@ class Model {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
                 if (rows[1] != undefined) return resolve(0);
 
                 return resolve(1);
@@ -332,7 +500,7 @@ class Model {
         const sql_request = `DROP TABLE IF EXISTS ${this.name};`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
                 console.log(rows);
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
@@ -361,11 +529,11 @@ class Model {
      * @throws {Error} If there is an error executing the SQL_request query.
      */
     async generate_uuid(var_uuid = "uuid") {
-        const uuid = (await connexion.promise().query("SELECT UUID();"))[0][0]["UUID()"];
+        const uuid = (await getConnexion().promise().query("SELECT UUID();"))[0][0]["UUID()"];
         const sql_request = `SELECT COUNT(*) FROM ${this.name} WHERE ${var_uuid}="${uuid}";`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
                 if (rows[0][0]['COUNT(*)'] == 0) return resolve(uuid);
                 resolve(null);
             }).catch((err) => {
@@ -376,4 +544,4 @@ class Model {
     }
 }
 
-module.exports = {Model}
+module.exports = { Model }
