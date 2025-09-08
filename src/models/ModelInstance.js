@@ -1,3 +1,6 @@
+const formatObject = require("../utils/formatObject");
+const generateCondition = require("../utils/generateCondition");
+
 /**
  * Represents an instance of a database model.
  * @class

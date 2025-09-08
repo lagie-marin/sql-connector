@@ -1,6 +1,12 @@
 const { logs, error, sql } = require("@mlagie/logger");
 const { sqlTypeMap } = require("../utils/sqlTypeMap");
 const { getConnexion } = require("../db/connexion");
+const generateCondition = require("../utils/generateCondition");
+const formatObject = require("../utils/formatObject");
+const fs = require('fs');
+const path = require('path');
+const glob = require('glob');
+const { ModelInstance } = require("./ModelInstance");
 
 function getFieldType(field) {
     if (typeof field === "object") {
@@ -63,7 +69,7 @@ function getColumnDefinition(fieldName, field) {
     if (field.auto_increment) colDef += ' AUTO_INCREMENT';
     if (field.primary_key) colDef += ' PRIMARY KEY';
     if (typeof field.customize === 'string' && field.customize.length != 0) colDef += ` ${field.customize}`;
-    return colDef;
+    return `${fieldName} ${colDef}`;
 }
 
 /**
@@ -91,10 +97,6 @@ class Model {
      * @returns {Promise<void>}
      */
     static async syncAllTables({ dangerousSync = false } = {}) {
-        const fs = require('fs');
-        const path = require('path');
-        const glob = require('glob');
-
         // Dépendances : {table: [tables dont elle dépend]}
         const dependencies = {};
         const modelMap = {};
