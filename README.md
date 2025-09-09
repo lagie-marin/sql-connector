@@ -149,6 +149,30 @@ const transferSchema = new Schema({
   2. **De supprimer le backup** après restauration ou non.
   3. Si vous refusez la suppression, le backup est renommé en `.ignored` et ne sera plus proposé.
 
+### Synchronisation intelligente des colonnes
+
+Lors de la synchronisation (`Model.syncAllTables()`), le module compare chaque colonne existante avec la définition du schéma JS :
+
+- **Type** : Si le type SQL attendu diffère de celui en base, la colonne est modifiée.
+- **Nullabilité** : Si la contrainte `NOT NULL` ou `NULL` diffère, la colonne est modifiée.  
+  > ⚠️ Une colonne `primary_key` est toujours considérée comme `NOT NULL` même si `required` n'est pas précisé.
+- **Valeur par défaut** : Si la valeur par défaut diffère, la colonne est modifiée.
+- **Unique** : Si la contrainte `UNIQUE` diffère, la colonne est modifiée.
+- **Primary key** : Si la contrainte `PRIMARY KEY` diffère, la colonne est modifiée.
+
+Seules les différences réelles entraînent une modification SQL, ce qui évite les migrations inutiles.
+
+> **Note :**  
+> Il est interdit de déclarer une colonne à la fois `primary_key: true` et `unique: true` dans le schéma JS.  
+> **Explication :** En SQL, une clé primaire (`PRIMARY KEY`) est déjà unique par définition et impose la contrainte `UNIQUE` et `NOT NULL` sur la colonne. Ajouter explicitement `unique: true` en plus de `primary_key: true` est redondant et provoque une erreur SQL ("Multiple primary key defined").  
+>  
+> **En résumé :**  
+> - Utilisez seulement `primary_key: true` pour une colonne qui doit être la clé primaire.  
+> - Utilisez `unique: true` pour une colonne qui doit être unique mais n'est pas la clé primaire.
+
+---
+
+
 #### Exemple d’utilisation
 
 ```js

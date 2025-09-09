@@ -52,6 +52,10 @@ function ifReservedKeywords(tableName) {
 }
 
 function getColumnDefinition(fieldName, field) {
+    if (field.primary_key && field.unique) {
+        throw new Error(`Field '${fieldName}' cannot be both PRIMARY KEY and UNIQUE.`);
+    }
+
     const fieldType = getFieldType(field);
     let colDef = "";
 
@@ -233,8 +237,50 @@ class Model {
             );
             let existingCols = columns.map(col => col.Field);
 
-            // --- Warn si oldName est présent dans le schéma ---
             for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                if (existingCols.includes(fieldName)) {
+                    // 1. Récupère infos colonne
+                    const currentCol = columns.find(col => col.Field === fieldName);
+                    const [indexes] = await conn.promise().query(
+                        `SHOW INDEX FROM \`${model.name}\` WHERE Column_name = ?`, [fieldName]
+                    );
+
+                    // 2. Vérifie les propriétés principales
+                    let needModify = false;
+
+                    // Type
+                    const expectedType = sqlTypeMap[getFieldType(field)]?.toUpperCase();
+                    const dbType = currentCol.Type.toUpperCase().split('(')[0];
+                    if (expectedType !== dbType)
+                        needModify = true;
+
+                    // Nullability check
+                    const shouldBeNotNull = field.required === true || field.primary_key === true;
+                    if ((shouldBeNotNull && currentCol.Null === "YES") || (!shouldBeNotNull && currentCol.Null === "NO"))
+                        needModify = true;
+
+                    // Default
+                    if ((field.default ?? null) != (currentCol.Default ?? null))
+                        needModify = true;
+
+                    // Unique
+                    const isUniqueInDB = indexes.some(idx => idx.Non_unique === 0 && idx.Key_name !== 'PRIMARY');
+                    if (!!field.unique !== isUniqueInDB)
+                        needModify = true;
+
+                    // Primary key
+                    const isPrimaryInDB = indexes.some(idx => idx.Key_name === 'PRIMARY');
+                    if (!!field.primary_key !== isPrimaryInDB)
+                        needModify = true;
+
+                    // 3. Si différence, on modifie
+                    if (needModify) {
+                        const newColDef = getColumnDefinition(fieldName, field);
+                        const alterSQL = `ALTER TABLE \`${model.name}\` MODIFY COLUMN ${newColDef}`;
+                        await conn.promise().query(alterSQL);
+                    }
+                }
+                // --- Warn si oldName est présent dans le schéma ---
                 if (field.oldName) {
                     logs(`⚠️  Pensez à retirer la propriété 'oldName' du champ '${fieldName}' dans le schéma JS de '${model.name}' pour éviter des renommages inutiles à l'avenir.`);
                 }
