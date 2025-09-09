@@ -245,39 +245,105 @@ class Model {
                         `SHOW INDEX FROM \`${model.name}\` WHERE Column_name = ?`, [fieldName]
                     );
 
-                    // 2. Vérifie les propriétés principales
+                    // 2. Vérifie les propriétés principales avec plus de précision
                     let needModify = false;
 
-                    // Type
-                    const expectedType = sqlTypeMap[getFieldType(field)]?.toUpperCase();
-                    const dbType = currentCol.Type.toUpperCase().split('(')[0];
-                    if (expectedType !== dbType)
-                        needModify = true;
+                    // --- Vérification du TYPE ---
+                    const fieldType = getFieldType(field);
+                    let expectedTypeDef;
 
-                    // Nullability check
+                    if (Array.isArray(field.enum) && field.enum.length > 0) {
+                        // Pour les ENUM, on compare la définition complète
+                        const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
+                        expectedTypeDef = `enum(${enumValues})`;
+                    } else {
+                        // Pour les autres types
+                        if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
+
+                        expectedTypeDef = sqlTypeMap[fieldType];
+                        if (sqlTypeMap[fieldType] === "VARCHAR" || sqlTypeMap[fieldType] === "INT") {
+                            const length = field.length > 0 ? field.length : 255;
+                            expectedTypeDef += `(${length})`;
+                        }
+                    }
+
+                    // Normalisation pour la comparaison (minuscules, suppression des espaces)
+                    const normalizeType = (typeStr) => {
+                        return typeStr.toLowerCase().replace(/\s+/g, '').replace(/`/g, '');
+                    };
+
+                    const currentTypeNormalized = normalizeType(currentCol.Type);
+                    const expectedTypeNormalized = normalizeType(expectedTypeDef);
+
+                    if (currentTypeNormalized !== expectedTypeNormalized) {
+                        logs(`Type mismatch for ${fieldName}: DB has '${currentCol.Type}', expected '${expectedTypeDef}'`);
+                        needModify = true;
+                    }
+
+                    // --- Vérification NULL/NOT NULL ---
                     const shouldBeNotNull = field.required === true || field.primary_key === true;
-                    if ((shouldBeNotNull && currentCol.Null === "YES") || (!shouldBeNotNull && currentCol.Null === "NO"))
-                        needModify = true;
+                    const isNullableInDB = currentCol.Null === "YES";
 
-                    // Default
-                    if ((field.default ?? null) != (currentCol.Default ?? null))
+                    if (shouldBeNotNull && isNullableInDB) {
+                        logs(`Nullability mismatch for ${fieldName}: DB allows NULL, expected NOT NULL`);
                         needModify = true;
+                    }
+                    if (!shouldBeNotNull && !isNullableInDB) {
+                        logs(`Nullability mismatch for ${fieldName}: DB is NOT NULL, expected NULL allowed`);
+                        needModify = true;
+                    }
 
-                    // Unique
+                    // --- Vérification DEFAULT VALUE ---
+                    const expectedDefault = field.default !== undefined ? field.default : null;
+                    const currentDefault = currentCol.Default;
+
+                    // Gestion spéciale pour les valeurs par défaut
+                    if (expectedDefault !== null && currentDefault === null) {
+                        logs(`Default value mismatch for ${fieldName}: DB has NULL, expected '${expectedDefault}'`);
+                        needModify = true;
+                    } else if (expectedDefault === null && currentDefault !== null) {
+                        logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected NULL`);
+                        needModify = true;
+                    } else if (expectedDefault !== null && currentDefault !== null) {
+                        // Comparaison stringifiée pour éviter les problèmes de type
+                        if (String(expectedDefault) !== String(currentDefault)) {
+                            logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected '${expectedDefault}'`);
+                            needModify = true;
+                        }
+                    }
+
+                    // --- Vérification UNIQUE constraint ---
                     const isUniqueInDB = indexes.some(idx => idx.Non_unique === 0 && idx.Key_name !== 'PRIMARY');
-                    if (!!field.unique !== isUniqueInDB)
+                    if (!!field.unique !== isUniqueInDB) {
+                        logs(`Unique constraint mismatch for ${fieldName}: DB has unique=${isUniqueInDB}, expected=${!!field.unique}`);
                         needModify = true;
+                    }
 
-                    // Primary key
+                    // --- Vérification PRIMARY KEY ---
                     const isPrimaryInDB = indexes.some(idx => idx.Key_name === 'PRIMARY');
-                    if (!!field.primary_key !== isPrimaryInDB)
+                    if (!!field.primary_key !== isPrimaryInDB) {
+                        logs(`Primary key mismatch for ${fieldName}: DB has PK=${isPrimaryInDB}, expected=${!!field.primary_key}`);
                         needModify = true;
+                    }
+
+                    // --- Vérification AUTO_INCREMENT ---
+                    const isAutoIncrementInDB = currentCol.Extra.toLowerCase().includes('auto_increment');
+                    if (!!field.auto_increment !== isAutoIncrementInDB) {
+                        logs(`Auto increment mismatch for ${fieldName}: DB has AI=${isAutoIncrementInDB}, expected=${!!field.auto_increment}`);
+                        needModify = true;
+                    }
 
                     // 3. Si différence, on modifie
                     if (needModify) {
-                        const newColDef = getColumnDefinition(fieldName, field);
-                        const alterSQL = `ALTER TABLE \`${model.name}\` MODIFY COLUMN ${newColDef}`;
-                        await conn.promise().query(alterSQL);
+                        try {
+                            const newColDef = getColumnDefinition(fieldName, field);
+                            const alterSQL = `ALTER TABLE \`${model.name}\` MODIFY COLUMN ${newColDef}`;
+                            logs(`Modifying column ${fieldName}: ${alterSQL}`);
+                            await conn.promise().query(alterSQL);
+                            logs(`Column ${fieldName} modified successfully`);
+                        } catch (err) {
+                            error(`Error modifying column ${fieldName}: ${err}`);
+                        }
                     }
                 }
                 // --- Warn si oldName est présent dans le schéma ---
