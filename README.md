@@ -111,6 +111,13 @@ const transferSchema = new Schema({
 
 ## Synchronisation automatique du schéma et gestion des migrations
 
+> **⚠️ Important : Synchronisation du schéma et sécurité**
+>
+> Toutes les opérations de synchronisation avancée du schéma (modification de type, contraintes, renommage, suppression de colonnes, etc.) **ne sont effectuées que si vous activez explicitement l’option `{ dangerousSync: true }`** lors de l’appel à `Model.syncAllTables`.
+>
+> Par défaut (`dangerousSync: false`), aucune modification de structure n’est appliquée sur les tables existantes pour garantir la sécurité de vos données en production.  
+> Utilisez `dangerousSync` uniquement dans un environnement de développement ou lors de migrations contrôlées.
+
 ### Ajout, suppression et renommage de colonnes
 
 - **Ajout automatique de colonnes**  

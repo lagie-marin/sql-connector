@@ -180,213 +180,215 @@ class Model {
                 throw err;
             }
 
-            // --- Restauration automatique si backup SQL trouvé ---
-            const backupPattern = `./backup_${model.name}_*.sql`;
-            const backupFiles = glob.sync(backupPattern).filter(f => !f.endsWith('.ignored'));
-            if (backupFiles.length > 0) {
-                const latestBackup = backupFiles.sort().reverse()[0];
-                const readline = require('readline');
-                const rl = readline.createInterface({
-                    input: process.stdin,
-                    output: process.stdout
-                });
-
-                // Demande restauration
-                const answer = await new Promise((resolve) => {
-                    rl.question(
-                        `Un backup a été trouvé pour la table '${model.name}' (${latestBackup}). Voulez-vous restaurer les données ? (y/N) `,
-                        (answer) => {
-                            resolve(answer.trim().toLowerCase());
-                        }
-                    );
-                });
-
-                if (answer === 'y') {
-                    try {
-                        const sqlContent = fs.readFileSync(latestBackup, 'utf-8');
-                        await conn.promise().query(sqlContent);
-                        await logs(`Backup restauré pour la table '${model.name}'.`);
-                    } catch (err) {
-                        error(`Erreur lors de la restauration du backup pour '${model.name}': ${err}`);
-                    }
-                }
-
-                // Toujours demander la suppression après restauration ou non
-                await new Promise((resolve) => {
-                    rl.question(
-                        `Voulez-vous supprimer le fichier de backup '${latestBackup}' ? (y/N) `,
-                        (delAnswer) => {
-                            if (delAnswer.trim().toLowerCase() === 'y') {
-                                fs.unlinkSync(latestBackup);
-                                logs(`Backup supprimé : ${latestBackup}`);
-                            } else {
-                                // Renomme le fichier pour ne plus proposer la restauration
-                                fs.renameSync(latestBackup, latestBackup + '.ignored');
-                                logs(`Backup ignoré pour la table '${model.name}'. Il ne sera plus proposé.`);
+            if (dangerousSync) {
+                // --- Restauration automatique si backup SQL trouvé ---
+                const backupPattern = `./backup_${model.name}_*.sql`;
+                const backupFiles = glob.sync(backupPattern).filter(f => !f.endsWith('.ignored'));
+                if (backupFiles.length > 0) {
+                    const latestBackup = backupFiles.sort().reverse()[0];
+                    const readline = require('readline');
+                    const rl = readline.createInterface({
+                        input: process.stdin,
+                        output: process.stdout
+                    });
+    
+                    // Demande restauration
+                    const answer = await new Promise((resolve) => {
+                        rl.question(
+                            `Un backup a été trouvé pour la table '${model.name}' (${latestBackup}). Voulez-vous restaurer les données ? (y/N) `,
+                            (answer) => {
+                                resolve(answer.trim().toLowerCase());
                             }
-                            rl.close();
-                            resolve();
-                        }
-                    );
-                });
-            }
-
-            // 2. Synchronise les colonnes (renommage, ajout, suppression)
-            const [columns] = await conn.promise().query(
-                `SHOW COLUMNS FROM \`${model.name}\``
-            );
-            let existingCols = columns.map(col => col.Field);
-
-            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
-                if (existingCols.includes(fieldName)) {
-                    // 1. Récupère infos colonne
-                    const currentCol = columns.find(col => col.Field === fieldName);
-                    const [indexes] = await conn.promise().query(
-                        `SHOW INDEX FROM \`${model.name}\` WHERE Column_name = ?`, [fieldName]
-                    );
-
-                    // 2. Vérifie les propriétés principales avec plus de précision
-                    let needModify = false;
-
-                    // --- Vérification du TYPE ---
-                    const fieldType = getFieldType(field);
-                    let expectedTypeDef;
-
-                    if (Array.isArray(field.enum) && field.enum.length > 0) {
-                        // Pour les ENUM, on compare la définition complète
-                        const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
-                        expectedTypeDef = `enum(${enumValues})`;
-                    } else {
-                        // Pour les autres types
-                        if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
-
-                        expectedTypeDef = sqlTypeMap[fieldType];
-                        if (sqlTypeMap[fieldType] === "VARCHAR" || sqlTypeMap[fieldType] === "INT") {
-                            const length = field.length > 0 ? field.length : 255;
-                            expectedTypeDef += `(${length})`;
+                        );
+                    });
+    
+                    if (answer === 'y') {
+                        try {
+                            const sqlContent = fs.readFileSync(latestBackup, 'utf-8');
+                            await conn.promise().query(sqlContent);
+                            await logs(`Backup restauré pour la table '${model.name}'.`);
+                        } catch (err) {
+                            error(`Erreur lors de la restauration du backup pour '${model.name}': ${err}`);
                         }
                     }
-
-                    // Normalisation pour la comparaison (minuscules, suppression des espaces)
-                    const normalizeType = (typeStr) => {
-                        return typeStr.toLowerCase().replace(/\s+/g, '').replace(/`/g, '');
-                    };
-
-                    const currentTypeNormalized = normalizeType(currentCol.Type);
-                    const expectedTypeNormalized = normalizeType(expectedTypeDef);
-
-                    if (currentTypeNormalized !== expectedTypeNormalized) {
-                        logs(`Type mismatch for ${fieldName}: DB has '${currentCol.Type}', expected '${expectedTypeDef}'`);
-                        needModify = true;
-                    }
-
-                    // --- Vérification NULL/NOT NULL ---
-                    const shouldBeNotNull = field.required === true || field.primary_key === true;
-                    const isNullableInDB = currentCol.Null === "YES";
-
-                    if (shouldBeNotNull && isNullableInDB) {
-                        logs(`Nullability mismatch for ${fieldName}: DB allows NULL, expected NOT NULL`);
-                        needModify = true;
-                    }
-                    if (!shouldBeNotNull && !isNullableInDB) {
-                        logs(`Nullability mismatch for ${fieldName}: DB is NOT NULL, expected NULL allowed`);
-                        needModify = true;
-                    }
-
-                    // --- Vérification DEFAULT VALUE ---
-                    const expectedDefault = field.default !== undefined ? field.default : null;
-                    const currentDefault = currentCol.Default;
-
-                    // Gestion spéciale pour les valeurs par défaut
-                    if (expectedDefault !== null && currentDefault === null) {
-                        logs(`Default value mismatch for ${fieldName}: DB has NULL, expected '${expectedDefault}'`);
-                        needModify = true;
-                    } else if (expectedDefault === null && currentDefault !== null) {
-                        logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected NULL`);
-                        needModify = true;
-                    } else if (expectedDefault !== null && currentDefault !== null) {
-                        // Comparaison stringifiée pour éviter les problèmes de type
-                        if (String(expectedDefault) !== String(currentDefault)) {
-                            logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected '${expectedDefault}'`);
+    
+                    // Toujours demander la suppression après restauration ou non
+                    await new Promise((resolve) => {
+                        rl.question(
+                            `Voulez-vous supprimer le fichier de backup '${latestBackup}' ? (y/N) `,
+                            (delAnswer) => {
+                                if (delAnswer.trim().toLowerCase() === 'y') {
+                                    fs.unlinkSync(latestBackup);
+                                    logs(`Backup supprimé : ${latestBackup}`);
+                                } else {
+                                    // Renomme le fichier pour ne plus proposer la restauration
+                                    fs.renameSync(latestBackup, latestBackup + '.ignored');
+                                    logs(`Backup ignoré pour la table '${model.name}'. Il ne sera plus proposé.`);
+                                }
+                                rl.close();
+                                resolve();
+                            }
+                        );
+                    });
+                }
+    
+                // 2. Synchronise les colonnes (renommage, ajout, suppression)
+                const [columns] = await conn.promise().query(
+                    `SHOW COLUMNS FROM \`${model.name}\``
+                );
+                let existingCols = columns.map(col => col.Field);
+    
+                for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                    if (existingCols.includes(fieldName)) {
+                        // 1. Récupère infos colonne
+                        const currentCol = columns.find(col => col.Field === fieldName);
+                        const [indexes] = await conn.promise().query(
+                            `SHOW INDEX FROM \`${model.name}\` WHERE Column_name = ?`, [fieldName]
+                        );
+    
+                        // 2. Vérifie les propriétés principales avec plus de précision
+                        let needModify = false;
+    
+                        // --- Vérification du TYPE ---
+                        const fieldType = getFieldType(field);
+                        let expectedTypeDef;
+    
+                        if (Array.isArray(field.enum) && field.enum.length > 0) {
+                            // Pour les ENUM, on compare la définition complète
+                            const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
+                            expectedTypeDef = `enum(${enumValues})`;
+                        } else {
+                            // Pour les autres types
+                            if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
+    
+                            expectedTypeDef = sqlTypeMap[fieldType];
+                            if (sqlTypeMap[fieldType] === "VARCHAR" || sqlTypeMap[fieldType] === "INT") {
+                                const length = field.length > 0 ? field.length : 255;
+                                expectedTypeDef += `(${length})`;
+                            }
+                        }
+    
+                        // Normalisation pour la comparaison (minuscules, suppression des espaces)
+                        const normalizeType = (typeStr) => {
+                            return typeStr.toLowerCase().replace(/\s+/g, '').replace(/`/g, '');
+                        };
+    
+                        const currentTypeNormalized = normalizeType(currentCol.Type);
+                        const expectedTypeNormalized = normalizeType(expectedTypeDef);
+    
+                        if (currentTypeNormalized !== expectedTypeNormalized) {
+                            logs(`Type mismatch for ${fieldName}: DB has '${currentCol.Type}', expected '${expectedTypeDef}'`);
                             needModify = true;
                         }
-                    }
-
-                    // --- Vérification UNIQUE constraint ---
-                    const isUniqueInDB = indexes.some(idx => idx.Non_unique === 0 && idx.Key_name !== 'PRIMARY');
-                    if (!!field.unique !== isUniqueInDB) {
-                        logs(`Unique constraint mismatch for ${fieldName}: DB has unique=${isUniqueInDB}, expected=${!!field.unique}`);
-                        needModify = true;
-                    }
-
-                    // --- Vérification PRIMARY KEY ---
-                    const isPrimaryInDB = indexes.some(idx => idx.Key_name === 'PRIMARY');
-                    if (!!field.primary_key !== isPrimaryInDB) {
-                        logs(`Primary key mismatch for ${fieldName}: DB has PK=${isPrimaryInDB}, expected=${!!field.primary_key}`);
-                        needModify = true;
-                    }
-
-                    // --- Vérification AUTO_INCREMENT ---
-                    const isAutoIncrementInDB = currentCol.Extra.toLowerCase().includes('auto_increment');
-                    if (!!field.auto_increment !== isAutoIncrementInDB) {
-                        logs(`Auto increment mismatch for ${fieldName}: DB has AI=${isAutoIncrementInDB}, expected=${!!field.auto_increment}`);
-                        needModify = true;
-                    }
-
-                    // 3. Si différence, on modifie
-                    if (needModify) {
-                        try {
-                            const newColDef = getColumnDefinition(fieldName, field);
-                            const alterSQL = `ALTER TABLE \`${model.name}\` MODIFY COLUMN ${newColDef}`;
-                            logs(`Modifying column ${fieldName}: ${alterSQL}`);
-                            await conn.promise().query(alterSQL);
-                            logs(`Column ${fieldName} modified successfully`);
-                        } catch (err) {
-                            error(`Error modifying column ${fieldName}: ${err}`);
+    
+                        // --- Vérification NULL/NOT NULL ---
+                        const shouldBeNotNull = field.required === true || field.primary_key === true;
+                        const isNullableInDB = currentCol.Null === "YES";
+    
+                        if (shouldBeNotNull && isNullableInDB) {
+                            logs(`Nullability mismatch for ${fieldName}: DB allows NULL, expected NOT NULL`);
+                            needModify = true;
+                        }
+                        if (!shouldBeNotNull && !isNullableInDB) {
+                            logs(`Nullability mismatch for ${fieldName}: DB is NOT NULL, expected NULL allowed`);
+                            needModify = true;
+                        }
+    
+                        // --- Vérification DEFAULT VALUE ---
+                        const expectedDefault = field.default !== undefined ? field.default : null;
+                        const currentDefault = currentCol.Default;
+    
+                        // Gestion spéciale pour les valeurs par défaut
+                        if (expectedDefault !== null && currentDefault === null) {
+                            logs(`Default value mismatch for ${fieldName}: DB has NULL, expected '${expectedDefault}'`);
+                            needModify = true;
+                        } else if (expectedDefault === null && currentDefault !== null) {
+                            logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected NULL`);
+                            needModify = true;
+                        } else if (expectedDefault !== null && currentDefault !== null) {
+                            // Comparaison stringifiée pour éviter les problèmes de type
+                            if (String(expectedDefault) !== String(currentDefault)) {
+                                logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected '${expectedDefault}'`);
+                                needModify = true;
+                            }
+                        }
+    
+                        // --- Vérification UNIQUE constraint ---
+                        const isUniqueInDB = indexes.some(idx => idx.Non_unique === 0 && idx.Key_name !== 'PRIMARY');
+                        if (!!field.unique !== isUniqueInDB) {
+                            logs(`Unique constraint mismatch for ${fieldName}: DB has unique=${isUniqueInDB}, expected=${!!field.unique}`);
+                            needModify = true;
+                        }
+    
+                        // --- Vérification PRIMARY KEY ---
+                        const isPrimaryInDB = indexes.some(idx => idx.Key_name === 'PRIMARY');
+                        if (!!field.primary_key !== isPrimaryInDB) {
+                            logs(`Primary key mismatch for ${fieldName}: DB has PK=${isPrimaryInDB}, expected=${!!field.primary_key}`);
+                            needModify = true;
+                        }
+    
+                        // --- Vérification AUTO_INCREMENT ---
+                        const isAutoIncrementInDB = currentCol.Extra.toLowerCase().includes('auto_increment');
+                        if (!!field.auto_increment !== isAutoIncrementInDB) {
+                            logs(`Auto increment mismatch for ${fieldName}: DB has AI=${isAutoIncrementInDB}, expected=${!!field.auto_increment}`);
+                            needModify = true;
+                        }
+    
+                        // 3. Si différence, on modifie
+                        if (needModify) {
+                            try {
+                                const newColDef = getColumnDefinition(fieldName, field);
+                                const alterSQL = `ALTER TABLE \`${model.name}\` MODIFY COLUMN ${newColDef}`;
+                                logs(`Modifying column ${fieldName}: ${alterSQL}`);
+                                await conn.promise().query(alterSQL);
+                                logs(`Column ${fieldName} modified successfully`);
+                            } catch (err) {
+                                error(`Error modifying column ${fieldName}: ${err}`);
+                            }
                         }
                     }
+                    // --- Warn si oldName est présent dans le schéma ---
+                    if (field.oldName) {
+                        logs(`⚠️  Pensez à retirer la propriété 'oldName' du champ '${fieldName}' dans le schéma JS de '${model.name}' pour éviter des renommages inutiles à l'avenir.`);
+                    }
                 }
-                // --- Warn si oldName est présent dans le schéma ---
-                if (field.oldName) {
-                    logs(`⚠️  Pensez à retirer la propriété 'oldName' du champ '${fieldName}' dans le schéma JS de '${model.name}' pour éviter des renommages inutiles à l'avenir.`);
-                }
-            }
-
-            // --- Étape 1 : Renommage des colonnes ---
-            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
-                if (field.oldName && existingCols.includes(field.oldName) && !existingCols.includes(fieldName)) {
-                    // Génère la définition SQL de la nouvelle colonne
-                    let colDef = getColumnDefinition(fieldName, field);
-
-                    // Renomme la colonne
-                    const alterSQL = `ALTER TABLE \`${model.name}\` CHANGE COLUMN \`${field.oldName}\` \`${fieldName}\` ${colDef}`;
-                    await conn.promise().query(alterSQL);
-                    logs(`Colonne ${field.oldName} renommée en ${fieldName} dans ${model.name}`);
-                    // Mets à jour existingCols pour la suite
-                    existingCols = existingCols.map(col => col === field.oldName ? fieldName : col);
-                }
-            }
-
-            // --- Étape 2 : Ajout des colonnes manquantes ---
-            for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
-                if (!existingCols.includes(fieldName)) {
-                    let colDef = getColumnDefinition(fieldName, field);
-
-                    // Ajoute la colonne
-                    const alterSQL = `ALTER TABLE \`${model.name}\` ADD COLUMN ${colDef}`;
-                    await conn.promise().query(alterSQL);
-                    logs(`Colonne ${fieldName} ajoutée à ${model.name}`);
-                    existingCols.push(fieldName);
-                }
-            }
-
-            // --- Étape 3 : Suppression des colonnes orphelines (dangerousSync) ---
-            if (dangerousSync) {
-                for (const col of existingCols) {
-                    if (!Object.keys(model.schema.schemaDict).includes(col)) {
-                        const alterSQL = `ALTER TABLE \`${model.name}\` DROP COLUMN \`${col}\``;
+    
+                // --- Étape 1 : Renommage des colonnes ---
+                for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                    if (field.oldName && existingCols.includes(field.oldName) && !existingCols.includes(fieldName)) {
+                        // Génère la définition SQL de la nouvelle colonne
+                        let colDef = getColumnDefinition(fieldName, field);
+    
+                        // Renomme la colonne
+                        const alterSQL = `ALTER TABLE \`${model.name}\` CHANGE COLUMN \`${field.oldName}\` \`${fieldName}\` ${colDef}`;
                         await conn.promise().query(alterSQL);
-                        logs(`Colonne ${col} supprimée de ${model.name}`);
+                        logs(`Colonne ${field.oldName} renommée en ${fieldName} dans ${model.name}`);
+                        // Mets à jour existingCols pour la suite
+                        existingCols = existingCols.map(col => col === field.oldName ? fieldName : col);
+                    }
+                }
+    
+                // --- Étape 2 : Ajout des colonnes manquantes ---
+                for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
+                    if (!existingCols.includes(fieldName)) {
+                        let colDef = getColumnDefinition(fieldName, field);
+    
+                        // Ajoute la colonne
+                        const alterSQL = `ALTER TABLE \`${model.name}\` ADD COLUMN ${colDef}`;
+                        await conn.promise().query(alterSQL);
+                        logs(`Colonne ${fieldName} ajoutée à ${model.name}`);
+                        existingCols.push(fieldName);
+                    }
+                }
+    
+                // --- Étape 3 : Suppression des colonnes orphelines (dangerousSync) ---
+                if (dangerousSync) {
+                    for (const col of existingCols) {
+                        if (!Object.keys(model.schema.schemaDict).includes(col)) {
+                            const alterSQL = `ALTER TABLE \`${model.name}\` DROP COLUMN \`${col}\``;
+                            await conn.promise().query(alterSQL);
+                            logs(`Colonne ${col} supprimée de ${model.name}`);
+                        }
                     }
                 }
             }
