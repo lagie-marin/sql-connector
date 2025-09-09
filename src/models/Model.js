@@ -373,7 +373,7 @@ class Model {
                     let colDef = getColumnDefinition(fieldName, field);
 
                     // Ajoute la colonne
-                    const alterSQL = `ALTER TABLE \`${model.name}\` ADD COLUMN \`${fieldName}\` ${colDef}`;
+                    const alterSQL = `ALTER TABLE \`${model.name}\` ADD COLUMN ${colDef}`;
                     await conn.promise().query(alterSQL);
                     logs(`Colonne ${fieldName} ajoutée à ${model.name}`);
                     existingCols.push(fieldName);

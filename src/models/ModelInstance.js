@@ -1,3 +1,4 @@
+const { getConnexion } = require("../db/connexion");
 const formatObject = require("../utils/formatObject");
 const generateCondition = require("../utils/generateCondition");
 
@@ -42,7 +43,7 @@ class ModelInstance {
     async updateOne(model) {
         const sql_request = `UPDATE ${this.name} SET ${generateCondition(formatObject(model), true)} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data), false, this.schema)}`;
 
-        await connexion.promise().query(sql_request).catch((err) => {
+        await getConnexion().promise().query(sql_request).catch((err) => {
             error(`Error executing query: ${err}`);
             throw err;
         });
@@ -59,7 +60,7 @@ class ModelInstance {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
 
                 if (rows[1] != undefined) return resolve(0);
 
@@ -80,7 +81,7 @@ class ModelInstance {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data))}`;
 
         return new Promise((resolve, reject) => {
-            connexion.promise().query(sql_request).then((rows) => {
+            getConnexion().promise().query(sql_request).then((rows) => {
                 if (rows[1] != undefined) return resolve(0);
 
                 resolve(1);
@@ -99,7 +100,7 @@ class ModelInstance {
      */
     async customRequest(custom) {
         return new Promise(async (resolve, reject) => {
-            await connexion.promise().query(custom).then((rows) => {
+            await getConnexion().promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
                 resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
