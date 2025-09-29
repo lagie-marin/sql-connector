@@ -19,12 +19,14 @@ module.exports = function (filter, isUpdate = false, schema = null) {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
 
+    const filteredKeys = isUpdate ? keys.filter(key => filter[key] !== undefined) : keys;
+    const filteredValues = isUpdate ? filteredKeys.map(key => filter[key]) : values;
+
     if (!isUpdate && schema && schema.schemaDict) {
-        const uniqueKeys = keys.filter(key => {
+        const uniqueKeys = filteredKeys.filter(key => {
             const field = schema.schemaDict[key];
             return field && field.unique === true;
         });
-
         if (uniqueKeys.length > 0) {
             return uniqueKeys.map(key => {
                 const value = filter[key];
@@ -36,14 +38,14 @@ module.exports = function (filter, isUpdate = false, schema = null) {
                     return `JSON_CONTAINS(${key}, '${jsonVal}')`;
                 }
                 if (value === null || value === "null") return `${key} IS NULL`;
-                return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
+                return `${key} = ${typeof value === "string" ? `"${v}"` : value}`;
             }).join(" AND ");
         }
     }
 
     // Comportement par défaut
-    const conditions = keys.map((key, index) => {
-        const value = values[index];
+    const conditions = filteredKeys.map((key, index) => {
+        const value = filteredValues[index];
 
         if (Array.isArray(value)) {
             return `${key} IN (${value.map(v => `"${v}"`).join(", ")})`;
@@ -59,6 +61,5 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         if ((value === null || value === "null") && isUpdate == false) return `${key} IS NULL`;
         return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
     }).join(` ${isUpdate == false ? "AND" : ","} `);
-
     return conditions;
 }
