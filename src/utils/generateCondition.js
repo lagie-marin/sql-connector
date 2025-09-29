@@ -38,7 +38,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
                     return `JSON_CONTAINS(${key}, '${jsonVal}')`;
                 }
                 if (value === null || value === "null") return `${key} IS NULL`;
-                return `${key} = ${typeof value === "string" ? `"${v}"` : value}`;
+                return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
             }).join(" AND ");
         }
     }
