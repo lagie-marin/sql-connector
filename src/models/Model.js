@@ -19,6 +19,70 @@ function getFieldType(field) {
     }
 }
 
+function isDateLikeType(fieldType) {
+    const normalizedType = String(fieldType ?? "").toLowerCase();
+    return ["date", "datetime", "timestamp", "now"].includes(normalizedType);
+}
+
+function isSqlTemporalDefault(defaultValue) {
+    if (typeof defaultValue !== "string") return false;
+
+    const normalizedValue = defaultValue.trim().toUpperCase();
+    return ["CURRENT_TIMESTAMP", "CURRENT_TIMESTAMP()", "NOW()"].includes(normalizedValue);
+}
+
+function formatDefaultSql(defaultValue, fieldType) {
+    if (defaultValue === undefined) return null;
+    if (defaultValue === null) return "DEFAULT NULL";
+
+    if (typeof defaultValue === "function") {
+        if (isDateLikeType(fieldType)) return "DEFAULT CURRENT_TIMESTAMP";
+        return formatDefaultSql(defaultValue(), fieldType);
+    }
+
+    if (defaultValue instanceof Date) {
+        const formattedDate = defaultValue.toISOString().slice(0, 19).replace("T", " ");
+        return `DEFAULT "${formattedDate}"`;
+    }
+
+    if (isSqlTemporalDefault(defaultValue)) return "DEFAULT CURRENT_TIMESTAMP";
+    if (typeof defaultValue === "string") return `DEFAULT "${defaultValue.replace(/"/g, '\\"')}"`;
+    if (typeof defaultValue === "number" || typeof defaultValue === "bigint") return `DEFAULT ${defaultValue}`;
+    if (typeof defaultValue === "boolean") return `DEFAULT ${defaultValue ? 1 : 0}`;
+    if (typeof defaultValue === "object") return `DEFAULT "${JSON.stringify(defaultValue).replace(/"/g, '\\"')}"`;
+
+    return `DEFAULT "${String(defaultValue).replace(/"/g, '\\"')}"`;
+}
+
+function normalizeDefaultValue(defaultValue, fieldType) {
+    if (defaultValue === undefined) return null;
+    if (defaultValue === null) return "null";
+
+    if (typeof defaultValue === "function") {
+        if (isDateLikeType(fieldType)) return "current_timestamp";
+        return normalizeDefaultValue(defaultValue(), fieldType);
+    }
+
+    if (defaultValue instanceof Date) {
+        return defaultValue.toISOString().slice(0, 19).replace("T", " ");
+    }
+
+    if (isSqlTemporalDefault(defaultValue)) return "current_timestamp";
+    if (typeof defaultValue === "boolean") return defaultValue ? "1" : "0";
+    if (typeof defaultValue === "object") return JSON.stringify(defaultValue);
+
+    return String(defaultValue);
+}
+
+function normalizeDbDefaultValue(defaultValue) {
+    if (defaultValue === null || defaultValue === undefined) return null;
+
+    const normalizedValue = String(defaultValue).trim();
+    if (/^current_timestamp(\(\))?$/i.test(normalizedValue)) return "current_timestamp";
+    if (/^now\(\)$/i.test(normalizedValue)) return "current_timestamp";
+    return normalizedValue;
+}
+
 function generateValueSQL(value) {
     return value.map(item => {
         if (item === null) return 'NULL';
@@ -67,8 +131,8 @@ function getColumnDefinition(fieldName, field) {
         colDef = `${sqlTypeMap[fieldType]}${(sqlTypeMap[fieldType] == "VARCHAR" || sqlTypeMap[fieldType] == "INT") ? `(${field.length > 0 ? field.length : 255})` : ""}`;
     }
     if (field.required) colDef += ' NOT NULL';
-    if (field.default !== undefined && field.default != null) colDef += ` DEFAULT "${field.default}"`;
-    if (field.default === null) colDef += ` DEFAULT NULL`;
+    const defaultDefinition = formatDefaultSql(field.default, fieldType);
+    if (defaultDefinition !== null) colDef += ` ${defaultDefinition}`;
     if (field.unique) colDef += ' UNIQUE';
     if (field.auto_increment) colDef += ' AUTO_INCREMENT';
     if (field.primary_key) colDef += ' PRIMARY KEY';
@@ -294,8 +358,8 @@ class Model {
                         }
 
                         // --- Vérification DEFAULT VALUE ---
-                        const expectedDefault = field.default !== undefined ? field.default : null;
-                        const currentDefault = currentCol.Default;
+                        const expectedDefault = normalizeDefaultValue(field.default, fieldType);
+                        const currentDefault = normalizeDbDefaultValue(currentCol.Default);
 
                         // Gestion spéciale pour les valeurs par défaut
                         if (expectedDefault !== null && currentDefault === null) {

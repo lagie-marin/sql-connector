@@ -248,4 +248,4 @@ export class ModelInstance {
 }
 
 export const client: Record<string, any>;
-export const sqlType: Record<string, SqlType>;
+export const sqlTypeMap: Record<SqlType, string>;

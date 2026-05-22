@@ -9,7 +9,7 @@ Le module `sql-connector` permet de gérer les connexions à une base de donnée
 ## Importation du module
 
 ```javascript
-const { Schema, connect, logout, Model, client, sqlType } = require('sql-connector');
+const { Schema, connect, logout, Model, client, sqlTypeMap } = require('sql-connector');
 ```
 
 ### Fonctions
@@ -244,7 +244,7 @@ await userInstance.updateOne({ mdp: 'newpassword' });
 await userInstance.delete({ token: 'abc123' });
 ```
 # Types SQL
-Le module fournit également une map des types SQL courants via `sqlType`.
+Le module fournit une map des types SQL courants via `sqlTypeMap`.
 ## Type
 * String
 * Number
@@ -258,7 +258,6 @@ Le module fournit également une map des types SQL courants via `sqlType`.
 * Timestamp
 * ### Exemple
 ```javascript
-console.log(sqlType.String); // "String"
 console.log(sqlTypeMap.String); // "VARCHAR"
 ```
 ## Conclusion

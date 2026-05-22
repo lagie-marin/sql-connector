@@ -10,6 +10,7 @@ const sqlTypeMap = {
     Text: 'TEXT',
     DateTime: "DATETIME",
     Timestamp: "TIMESTAMP",
+    CurrentTimestamp: "CURRENT_TIMESTAMP"
 };
 
 module.exports = {sqlTypeMap}
