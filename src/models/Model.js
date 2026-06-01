@@ -1,4 +1,4 @@
-const { logs, error, sql } = require("@mlagie/logger");
+const { logs, error } = require("@mlagie/logger");
 const { sqlTypeMap } = require("../utils/sqlTypeMap");
 const { getConnexion } = require("../db/connexion");
 const generateCondition = require("../utils/generateCondition");
@@ -505,7 +505,7 @@ class Model {
     async save(data) {
         const keys = Object.keys(data);
         const sql_request = `INSERT INTO ${this.name} (${keys.join(', ')}) VALUES (${generateValueSQL(Object.values(data))})`;
-        sql(this.name, sql_request);
+
         try {
             const result = await getConnexion().promise().query(sql_request);
             return result;
