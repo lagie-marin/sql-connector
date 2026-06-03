@@ -1,4 +1,4 @@
-const { error, logs } = require("@mlagie/logger");
+const { error } = require("@mlagie/logger");
 const { getConnexion } = require("../db/connexion");
 const formatObject = require("../utils/formatObject");
 const generateCondition = require("../utils/generateCondition");
@@ -80,9 +80,6 @@ class ModelInstance {
             whereClause = generateCondition(formatObject(this.getRecordData()), false, this.schema);
         }
         const sql_request = `UPDATE ${this.name} SET ${setClause} WHERE ${whereClause}`;
-
-        // log SQL for debugging why update may not match
-        try { logs(`ModelInstance.updateOne SQL -> ${sql_request}`); } catch (e) {}
 
         const [result] = await getConnexion().promise().query(sql_request).catch((err) => {
             error(`Error executing query: ${err}`);
