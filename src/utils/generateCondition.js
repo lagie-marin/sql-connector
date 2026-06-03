@@ -29,37 +29,79 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         });
         if (uniqueKeys.length > 0) {
             return uniqueKeys.map(key => {
-                const value = filter[key];
+                let value = filter[key];
+                // normalize strings that may contain surrounding quotes or escaped quotes
+                if (typeof value === 'string') {
+                    value = value.trim();
+                    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                        value = value.slice(1, -1);
+                    }
+                    value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
+                }
                 if (Array.isArray(value)) {
-                    return `${key} IN (${value.map(v => `"${v}"`).join(", ")})`;
+                    return `${key} IN (${value.map(v => `'${String(v).replace(/'/g, "\\'")}'`).join(", ")})`;
                 }
                 if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
                     const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
-                    return `JSON_CONTAINS(${key}, '${jsonVal}')`;
+                    return `JSON_CONTAINS(${key}, '${String(jsonVal).replace(/'/g, "\\'")}')`;
                 }
                 if (value === null || value === "null") return `${key} IS NULL`;
-                return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
+                // if string looks like an ISO datetime, convert to MySQL DATETIME format
+                if (typeof value === 'string' && /T/.test(value)) {
+                    let val = value.replace(/\.\d+Z$/,'').replace(/Z$/,'').replace('T',' ');
+                    return `${key} = '${String(val).replace(/'/g, "\\'")}'`;
+                }
+                return `${key} = ${typeof value === "string" ? `'${String(value).replace(/'/g, "\\'")}'` : value}`;
             }).join(" AND ");
         }
     }
 
     // Comportement par défaut
     const conditions = filteredKeys.map((key, index) => {
-        const value = filteredValues[index];
+        let value = filteredValues[index];
+        if (typeof value === 'string') {
+            value = value.trim();
+            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
+            value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
+        }
 
         if (Array.isArray(value)) {
-            return `${key} IN (${value.map(v => `"${v}"`).join(", ")})`;
+            return `${key} IN (${value.map(v => `'${String(v).replace(/'/g, "\\'")}'`).join(", ")})`;
         }
         if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
             const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
             if (isUpdate) {
-                return `${key} = '${jsonVal}'`;
+                return `${key} = '${String(jsonVal).replace(/'/g, "\\'")}'`;
             }
-            return `JSON_CONTAINS(${key}, '${jsonVal}')`;
+            return `JSON_CONTAINS(${key}, '${String(jsonVal).replace(/'/g, "\\'")}')`;
         }
 
         if ((value === null || value === "null") && isUpdate == false) return `${key} IS NULL`;
-        return `${key} = ${typeof value === "string" ? `"${value}"` : value}`;
+
+        // handle date-like strings when schema tells us the field is temporal
+        const fieldDef = schema && schema.schemaDict ? schema.schemaDict[key] : null;
+        let fieldType = null;
+        if (fieldDef) {
+            if (fieldDef.type && fieldDef.type.name !== undefined) fieldType = fieldDef.type.name;
+            else if (fieldDef.type !== undefined) fieldType = fieldDef.type;
+            else if (fieldDef && fieldDef.name !== undefined) fieldType = fieldDef.name;
+        }
+        const normalizedFieldType = String(fieldType ?? "").toLowerCase();
+        const isDateLike = ["date", "datetime", "timestamp", "now"].includes(normalizedFieldType);
+
+        if (typeof value === "string") {
+            let val = value;
+            // strip surrounding quotes if any (double safety)
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1,-1);
+            // if ISO timestamp with Z, convert to MySQL DATETIME format
+            if (isDateLike && /T/.test(val)) {
+                val = val.replace(/\.\d+Z$/,'').replace(/Z$/,'').replace('T',' ');
+            }
+            return `${key} = '${String(val).replace(/'/g, "\\'")}'`;
+        }
+        return `${key} = ${value}`;
     }).join(` ${isUpdate == false ? "AND" : ","} `);
     return conditions;
 }

@@ -604,7 +604,7 @@ class Model {
             getConnexion().promise().query(sql_request).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
+                resolve(new ModelInstance(this.name, rows[0], this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;
@@ -632,7 +632,7 @@ class Model {
             await getConnexion().promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
+                resolve(new ModelInstance(this.name, rows[0], this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;

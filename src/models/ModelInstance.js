@@ -1,7 +1,8 @@
-const { error } = require("@mlagie/logger");
+const { error, logs } = require("@mlagie/logger");
 const { getConnexion } = require("../db/connexion");
 const formatObject = require("../utils/formatObject");
 const generateCondition = require("../utils/generateCondition");
+const util = require("util");
 
 /**
  * Represents an instance of a database model.
@@ -15,23 +16,38 @@ class ModelInstance {
      * @param {Object|null} [schema=null] The schema for the instance, if available.
      */
     constructor(name, data, schema = null) {
-        /**
-         * The name of the database table.
-         * @type {string}
-         */
-        this.name = name;
+        Object.defineProperties(this, {
+            name: {
+                value: name,
+                writable: true,
+                configurable: true,
+                enumerable: false
+            },
+            data: {
+                value: data,
+                writable: true,
+                configurable: true,
+                enumerable: true
+            },
+            schema: {
+                value: schema,
+                writable: true,
+                configurable: true,
+                enumerable: false
+            }
+        });
+    }
 
-        /**
-         * The instance data.
-         * @type {Object}
-         */
-        this.data = data;
+    getRecordData() {
+        return Array.isArray(this.data) ? this.data[0] ?? this.data : this.data;
+    }
 
-        /**
-         * The schema for the instance.
-         * @type {Object|null}
-         */
-        this.schema = schema;
+    toJSON() {
+        return this.getRecordData();
+    }
+
+    [util.inspect.custom]() {
+        return this.getRecordData();
     }
 
     /**
@@ -42,13 +58,50 @@ class ModelInstance {
      * @throws {Error} Throws an error if the update fails.
      */
     async updateOne(model) {
-        const sql_request = `UPDATE ${this.name} SET ${generateCondition(formatObject(model), true)} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data), false, this.schema)}`;
+        const setClause = generateCondition(formatObject(model), true);
 
-        await getConnexion().promise().query(sql_request).catch((err) => {
+        // prefer primary key(s) in WHERE to avoid mismatches on nullable/text fields
+        let whereClause;
+        try {
+            const rec = this.getRecordData();
+            const schemaDict = this.schema && this.schema.schemaDict ? this.schema.schemaDict : null;
+            if (schemaDict) {
+                const pkKeys = Object.entries(schemaDict).filter(([k, v]) => v && v.primary_key === true).map(([k]) => k);
+                if (pkKeys.length > 0) {
+                    const pkObj = {};
+                    for (const k of pkKeys) {
+                        if (rec && Object.prototype.hasOwnProperty.call(rec, k)) pkObj[k] = rec[k];
+                    }
+                    if (Object.keys(pkObj).length > 0) whereClause = generateCondition(formatObject(pkObj), false, this.schema);
+                }
+            }
+            if (!whereClause) whereClause = generateCondition(formatObject(rec), false, this.schema);
+        } catch (e) {
+            whereClause = generateCondition(formatObject(this.getRecordData()), false, this.schema);
+        }
+        const sql_request = `UPDATE ${this.name} SET ${setClause} WHERE ${whereClause}`;
+
+        // log SQL for debugging why update may not match
+        try { logs(`ModelInstance.updateOne SQL -> ${sql_request}`); } catch (e) {}
+
+        const [result] = await getConnexion().promise().query(sql_request).catch((err) => {
             error(`Error executing query: ${err}`);
             throw err;
         });
-        return 1;
+
+        const affected = result && (result.affectedRows !== undefined ? result.affectedRows : 0);
+
+        // Update in-memory data if DB was modified
+        if (affected > 0) {
+            const record = this.getRecordData();
+            if (Array.isArray(this.data)) {
+                if (this.data[0] && typeof this.data[0] === 'object') Object.assign(this.data[0], model);
+            } else if (record && typeof record === 'object') {
+                Object.assign(this.data, model);
+            }
+        }
+
+        return affected;
     }
 
     /**
@@ -79,7 +132,7 @@ class ModelInstance {
      * @throws {Error} Throws an error if the deletion fails.
      */
     async deleteOne() {
-        const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(this.data[0] != undefined ? this.data[0] : this.data))}`;
+        const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(this.getRecordData()))}`;
 
         return new Promise((resolve, reject) => {
             getConnexion().promise().query(sql_request).then((rows) => {
@@ -104,7 +157,7 @@ class ModelInstance {
             await getConnexion().promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, Object.values(rows[0]), this.schema));
+                resolve(new ModelInstance(this.name, rows[0], this.schema));
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;
