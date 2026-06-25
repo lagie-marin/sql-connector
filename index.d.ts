@@ -95,75 +95,46 @@ export class Model {
     schema: Schema;
     constructor(name: string, schema: Schema);
     /**
-     * Crée toutes les tables dans l'ordre correct en fonction des foreign keys.
+     * Creates all tables in the correct order based on foreign keys.
+     * @param dangerousSync default false
      * @returns {Promise<void>}
      */
-    static syncAllTables({ dangerousSync = false } = {}): Promise<void>;
+    static async syncAllTables(dangerousSync: Object): Promise<void>;
     /**
      * Saves data to the database table.
      * @param {Object} data The data to insert into the table.
      * @returns {Promise<Object>} A promise that resolves with the result of the insertion.
      * @throws {Error} Throws an error if the insert fails.
      */
-    save(data: Record<string, any>): Promise<any>;
+    async save(data: Record<string, any>): Promise<any>;
     /**
      * Récupère plusieurs entrées de la table.
      * @param {Object} [options] - Options de requête (attributs, where, order, limit).
-     * @param {string[]} [options.attributes] - Champs à retourner.
+     * @param {string[]} [options.select] - Champs à retourner.
      * @param {Object} [options.where] - Filtres (clé/valeur).
      * @param {Array} [options.order] - Ex: [['points', 'DESC']]
      * @param {number} [options.limit] - Limite de résultats.
      * @returns {Promise<Array<Object>>}
      */
-    findAll(options?: {
-        attributes?: string[];
+    static async find(options?: {
+        select?: string[];
         where?: Record<string, any>;
         order?: [string, string][];
         limit?: number;
     }): Promise<any[]>;
     /**
-     * Finds a unique entry in the database table based on the filter provided.
-     * @param {Object} filter An object containing the key-value pairs to use to generate the search condition.
-     * @param {string[]} [fields=["*"]] An array of field names to return in the result.
-     * @returns {Promise<ModelInstance|number>} A promise that resolves to a ModelInstance if an entry is found, otherwise 0.
-     */
-    findOne(filter: Record<string, any>, fields?: string[]): Promise<ModelInstance | number>;
-    /**
-     * Finds a record in the database based on the provided filter.
-     *
-     * @async
-     * @param {Object} filter - The filter criteria for the query. Should be an object where keys are column names and values are the values to filter by.
-     * @param {Array<string>} [fields=["*"]] - The fields to select in the query. Defaults to selecting all fields.
-     * @returns {Promise<ModelInstance|number>} - A promise that resolves to a `ModelInstance` if a record is found, or `0` if no records match the filter.
-     *
-     * @example
-     * // Example usage:
-     * const filter = { id: 1 };
-     * const fields = ["id", "name"];
-     * MyTable.find(filter, fields).then((result) => {
-     *     if (result === 0) {
-     *         console.log("No records found.");
-     *     } else {
-     *         console.log("Record found:", result);
-     *     }
-     * }).catch((err) => {
-     *     console.error("Error:", err);
-     * });
-     */
-    find(filter: Record<string, any>, fields?: string[]): Promise<ModelInstance | number>;
-    /**
      * 
      * @param {Object} filter The filter criteria for the query. Should be an object where keys are column names and values are the values to filter by.
      * @returns {Promise<ModelInstance|number>} - A promise that resolves to a `ModelInstance` if a record is found, or `0` if no records match the filter.
      */
-    count(filter?: Record<string, any>): Promise<any>;
+    async count(filter?: Record<string, any>): Promise<any>;
     /**
      * Runs a custom SQL_request query.
      * @param {string} custom The custom SQL_request query to execute.
      * @returns {Promise<void>} A promise that resolves when the query is executed.
      * @throws {Error} Throws an error if query execution fails.
      */
-    customRequest(custom: string): Promise<any>;
+    async customRequest(custom: string): Promise<any>;
     /**
      * Supprime une entrée de la table SQL correspondant au filtre fourni.
      *
@@ -174,7 +145,7 @@ export class Model {
      * ou à une instance de ModelInstance représentant la ligne supprimée.
      * @throws {Error} Lance une erreur si la requête SQL échoue.
      */
-    delete(filter: Record<string, any>): Promise<number | ModelInstance>;
+    async delete(filter: Record<string, any>): Promise<number | ModelInstance>;
     /**
      * Asynchronously drops a table if it exists in the database.
      *
@@ -185,7 +156,7 @@ export class Model {
      *
      * @returns {Promise<void>} A promise that resolves when the query execution is complete.
      */
-    dropTable(): Promise<void>;
+    async dropTable(): Promise<void>;
     /**
      * Generates a unique UUID for the current model.
      *
@@ -205,7 +176,7 @@ export class Model {
      *
      * @throws {Error} If there is an error executing the SQL_request query.
      */
-    generate_uuid(var_uuid?: string): Promise<string | null>;
+    async generate_uuid(var_uuid?: string): Promise<string | null>;
 }
 
 /**
@@ -224,27 +195,27 @@ export class ModelInstance {
      * @returns {int} A promise that resolves with updated data.
      * @throws {Error} Throws an error if the update fails.
      */
-    updateOne(model: Record<string, any>): Promise<number>;
+    async updateOne(model: Record<string, any>): Promise<number>;
     /**
      * Deletes a single entry in the database table.
      * @param {Object} model An object containing the key-value pairs to use for deletion.
      * @returns {Promise<Object>} A promise that resolves with the data deleted.
      * @throws {Error} Throws an error if the deletion fails.
      */
-    delete(filter: Record<string, any>): Promise<number | ModelInstance>;
+    async delete(filter: Record<string, any>): Promise<number | ModelInstance>;
     /**
      * Deletes a single entry in the database table based on the instance data.
      * @returns {Promise<number>} A promise that resolves to the number of rows deleted.
      * @throws {Error} Throws an error if the deletion fails.
      */
-    deleteOne(): Promise<number>;
+    async deleteOne(): Promise<number>;
     /**
      * Runs a custom SQL_request query.
      * @param {string} custom The custom SQL_request query to execute.
      * @returns {Promise<void>} A promise that resolves when the query is executed.
      * @throws {Error} Throws an error if query execution fails.
      */
-    customRequest(custom: string): Promise<any>;
+    async customRequest(custom: string): Promise<any>;
 }
 
 export const client: Record<string, any>;

@@ -59,6 +59,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
     // Comportement par défaut
     const conditions = filteredKeys.map((key, index) => {
         let value = filteredValues[index];
+
         if (typeof value === 'string') {
             value = value.trim();
             if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {

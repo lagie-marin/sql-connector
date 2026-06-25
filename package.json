@@ -1,6 +1,6 @@
 {
   "name": "@mlagie/sql-connector",
-  "version": "1.4.9",
+  "version": "1.5",
   "description": "Le module sql-connector permet de gérer les connexions à une base de données MySQL, de définir des schémas de tables, et d'interagir avec les données de manière simple et efficace.",
   "main": "index.js",
   "scripts": {
@@ -37,6 +37,6 @@
   "dependencies": {
     "@mlagie/logger": "1.0.2",
     "glob": "^13.0.6",
-    "mysql2": "3.22.4"
+    "mysql2": "3.22.5"
   }
 }

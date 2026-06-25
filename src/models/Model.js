@@ -7,6 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const glob = require('glob');
 const { ModelInstance } = require("./ModelInstance");
+const { buildSelect, buildQueryParts } = require("../utils/buildQuery");
+const util = require("util");
 
 function getFieldType(field) {
     if (typeof field === "object") {
@@ -161,7 +163,7 @@ class Model {
     }
 
     /**
-     * Synchronise toutes les tables avec leur schéma JS (création + ajout des colonnes manquantes).
+     * Synchronizes all tables with their JS schemas (creation + adding missing columns).
      * @returns {Promise<void>}
      */
     static async syncAllTables({ dangerousSync = false } = {}) {
@@ -496,6 +498,18 @@ class Model {
         return `CREATE TABLE IF NOT EXISTS ${this.name} (${columns.join(', ')}${foreignKey.length > 0 ? ", " + foreignKey.join(', ') : ""}) ENGINE=InnoDB`;
     }
 
+    getRecordData() {
+        return Array.isArray(this.data) ? this.data[0] ?? this.data : this.data;
+    }
+
+    toJSON() {
+        return this.getRecordData()?.data;
+    }
+
+    [util.inspect.custom]() {
+        return this.getRecordData();
+    }
+
     /**
      * Saves data to the database table.
      * @param {Object} data The data to insert into the table.
@@ -508,7 +522,7 @@ class Model {
 
         try {
             const result = await getConnexion().promise().query(sql_request);
-            return result;
+            return result[0];
         } catch (err) {
             error(`Error inserting data into ${this.name}: ${err}`);
             throw err;
@@ -516,109 +530,44 @@ class Model {
     }
 
     /**
-     * Récupère plusieurs entrées de la table.
-     * @param {Object} [options] - Options de requête (attributs, where, order, limit).
-     * @param {string[]} [options.attributes] - Champs à retourner.
-     * @param {Object} [options.where] - Filtres (clé/valeur).
+     * Retrieves multiple entries from the table.
+     * @param {Object} [options] - Query options (attributes, where, order, limit).
+     * @param {string[]} [options.select] - Champs à retourner.Champs à retourner.
+     * @param {Object} [options.where] - Filters (key/value).
      * @param {Array} [options.order] - Ex: [['points', 'DESC']]
      * @param {number} [options.limit] - Limite de résultats.
      * @returns {Promise<Array<ModelInstance>>}
      */
-    async findAll(options = {}) {
-        const {
-            attributes = ['*'],
-            where = undefined,
-            order = undefined,
-            limit = undefined
-        } = options;
+    async find(options = {}) {
+        const { select } = options;
+        const query = `SELECT ${buildSelect(select)} FROM ${this.name} ${buildQueryParts(options)}`;
 
-        let sql_request = `SELECT ${attributes.join(', ')} FROM ${this.name}`;
-        if (where) {
-            sql_request += ` WHERE ${generateCondition(formatObject(where))}`;
-        }
-        if (order && Array.isArray(order) && order.length > 0) {
-            const orderStr = order.map(([col, dir]) => `${col} ${dir}`).join(', ');
-            sql_request += ` ORDER BY ${orderStr}`;
-        }
-        if (limit) {
-            sql_request += ` LIMIT ${limit}`;
-        }
+        return new Promise(async (resolve, reject) => {
+            await getConnexion().promise().query(query).then((result) => {
+                // Le driver mysql2 renvoie [rows, fields], on isole le tableau de lignes 'rows'
+                const rows = result && Array.isArray(result) ? result[0] : result;
 
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then(([rows]) => {
+                // S'il n'y a aucun résultat, on renvoie un tableau vide [] (et pas 0, c'est plus propre pour faire des .length)
+                if (!rows || rows.length === 0) return resolve([]);
+
+                // 🚀 LE DÉCALAGE : On transforme chaque ligne brute en une ModelInstance unique
                 const instances = rows.map(row => new ModelInstance(this.name, row, this.schema));
+
                 resolve(instances);
             }).catch((err) => {
-                error(`Error executing findAll: ${err}`);
-                resolve([]);
+                error(`Error executing query find: ${err}`);
+                reject(err);
             });
         });
     }
 
     /**
-     * Finds a unique entry in the database table based on the filter provided.
-     * @param {Object} filter An object containing the key-value pairs to use to generate the search condition.
-     * @param {string[]} [fields=["*"]] An array of field names to return in the result.
-     * @returns {Promise<ModelInstance|number>} A promise that resolves to a ModelInstance if an entry is found, otherwise 0.
-     */
-    async findOne(filter, fields = ["*"]) {
-        const sql_request = `SELECT ${fields.join(", ")} FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
-
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then(([rows]) => {
-                if (!rows || rows.length === 0) return resolve(0);
-                resolve(new ModelInstance(this.name, rows[0], this.schema));
-            }).catch((err) => {
-                error(`Error executing query: ${err}`);
-                return resolve(0);
-            });
-        });
-    }
-
-    /**
-     * Finds a record in the database based on the provided filter.
-     *
-     * @async
-     * @param {Object} filter - The filter criteria for the query. Should be an object where keys are column names and values are the values to filter by.
-     * @param {Array<string>} [fields=["*"]] - The fields to select in the query. Defaults to selecting all fields.
-     * @returns {Promise<ModelInstance|number>} - A promise that resolves to a `ModelInstance` if a record is found, or `0` if no records match the filter.
-     *
-     * @example
-     * // Example usage:
-     * const filter = { id: 1 };
-     * const fields = ["id", "name"];
-     * MyTable.find(filter, fields).then((result) => {
-     *     if (result === 0) {
-     *         console.log("No records found.");
-     *     } else {
-     *         console.log("Record found:", result);
-     *     }
-     * }).catch((err) => {
-     *     console.error("Error:", err);
-     * });
-     */
-    async find(filter, fields = ["*"]) {
-        const sql_request = `SELECT ${fields.join(", ")} FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
-
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then((rows) => {
-                if (rows.length == 0) return resolve(0);
-
-                resolve(new ModelInstance(this.name, rows[0], this.schema));
-            }).catch((err) => {
-                error(`Error executing query: ${err}`);
-                return;
-            });
-        });
-    }
-
-    /**
-     * 
+     * Counts the number of records matching the given filter.
      * @param {Object} filter The filter criteria for the query. Should be an object where keys are column names and values are the values to filter by.
      * @returns {Promise<ModelInstance|number>} - A promise that resolves to a `ModelInstance` if a record is found, or `0` if no records match the filter.
      */
     async count(filter) {
-        return this.customRequest(`SELECT COUNT(*) as count FROM ${this.name} ${filter != undefined ? `WHERE ${generateCondition(formatObject(filter))}` : ""}`);
+        return this.customRequest(`SELECT COUNT(*) as count FROM ${this.name} ${filter != undefined ? `WHERE ${generateCondition(formatObject(filter))}` : ""}`, "count");
     }
 
     /**
@@ -627,28 +576,26 @@ class Model {
      * @returns {Promise<void>} A promise that resolves when the query is executed.
      * @throws {Error} Throws an error if query execution fails.
      */
-    async customRequest(custom) {
+    async customRequest(custom, custom_err_name = "") {
         return new Promise(async (resolve, reject) => {
             await getConnexion().promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, rows[0], this.schema));
+                resolve(new ModelInstance(this.name, rows, this.schema));
             }).catch((err) => {
-                error(`Error executing query: ${err}`);
+                error(`Error executing query ${custom_err_name}: ${err}`);
                 return;
             });
         })
     }
 
     /**
-     * Supprime une entrée de la table SQL correspondant au filtre fourni.
+     * Deletes an entry from the SQL table that matches the provided filter.
      *
-     * @async
-     * @function delete
-     * @param {Object} filter - Un objet représentant les conditions de filtre pour la suppression.
-     * @returns {Promise<number>} Une promesse qui se résout à 0 si aucune ligne n'a été supprimée,
-     * ou à une instance de ModelInstance représentant la ligne supprimée.
-     * @throws {Error} Lance une erreur si la requête SQL échoue.
+     * @param {Object} filter An object representing the filter conditions for deletion.
+     * @returns {Promise<number>} A promise that resolves to 0 if no rows were deleted,
+     * or to a ModelInstance representing the deleted row.
+     * @throws {Error} Throws an error if the SQL query fails.
      */
     async delete(filter) {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
@@ -658,7 +605,7 @@ class Model {
 
                 return resolve(1);
             }).catch((err) => {
-                error(`Error executing query: ${err}`);
+                error(`Error executing query delete: ${err}`);
                 return 0;
             });
         });
@@ -681,7 +628,7 @@ class Model {
             getConnexion().promise().query(sql_request).then((rows) => {
                 console.log(rows);
             }).catch((err) => {
-                error(`Error executing query: ${err}`);
+                error(`Error executing query drop: ${err}`);
                 return;
             });
         })
@@ -715,7 +662,7 @@ class Model {
                 if (rows[0][0]['COUNT(*)'] == 0) return resolve(uuid);
                 resolve(null);
             }).catch((err) => {
-                error(`Error executing query: ${err}`);
+                error(`Error executing query gen_uuid: ${err}`);
                 return null;
             })
         })

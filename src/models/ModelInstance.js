@@ -3,6 +3,7 @@ const { getConnexion } = require("../db/connexion");
 const formatObject = require("../utils/formatObject");
 const generateCondition = require("../utils/generateCondition");
 const util = require("util");
+const { serveur } = require("@mlagie/logger");
 
 /**
  * Represents an instance of a database model.
@@ -36,6 +37,37 @@ class ModelInstance {
                 enumerable: false
             }
         });
+        const row = this._getTargetRow();
+        if (row && typeof row === 'object') {
+            Object.keys(row).forEach(key => {
+                // On lie dynamiquement la clé de l'instance directement à la case mémoire de 'row'
+                Object.defineProperty(this, key, {
+                    get: () => {
+                        const val = row[key];
+                        // Auto-parse propre du JSON si la colonne MySQL stocke une String JSON
+                        if (typeof val === 'string' && val.trim().startsWith('{') && val.trim().endsWith('}')) {
+                            try { return JSON.parse(val); } catch (e) { return val; }
+                        }
+                        return val;
+                    },
+                    set: (newVal) => {
+                        // L'écriture modifie directement la référence d'origine dans 'row'
+                        row[key] = newVal;
+                    },
+                    enumerable: true, // Permet à JSON.stringify et console.log de voir la propriété
+                    configurable: true
+                });
+            });
+        }
+    }
+
+    /**
+     * Extrait la ligne de données réelle en gérant la structure du driver de BDD [rows, fields]
+     * @private
+     */
+    _getTargetRow() {
+        const rows = Array.isArray(this.data) && Array.isArray(this.data[0]) ? this.data[0] : this.data;
+        return Array.isArray(rows) ? rows[0] : rows;
     }
 
     getRecordData() {
@@ -60,10 +92,24 @@ class ModelInstance {
     async updateOne(model) {
         const setClause = generateCondition(formatObject(model), true);
 
-        // prefer primary key(s) in WHERE to avoid mismatches on nullable/text fields
         let whereClause;
         try {
-            const rec = this.getRecordData();
+            // 1. On récupère le tableau de données
+            const recordsArray = this.getRecordData();
+
+            // 2. On extrait le premier élément (la ligne actuelle)
+            let rawRec = Array.isArray(recordsArray) ? recordsArray[0] : recordsArray;
+
+            // 3. Si cet élément est une chaîne JSON, on le transforme en vrai objet JS
+            if (typeof rawRec === 'string') {
+                try {
+                    rawRec = JSON.parse(rawRec);
+                } catch (e) {
+                    // Pas du JSON valide, on garde la string d'origine
+                }
+            }
+            const rec = rawRec;
+
             const schemaDict = this.schema && this.schema.schemaDict ? this.schema.schemaDict : null;
             if (schemaDict) {
                 const pkKeys = Object.entries(schemaDict).filter(([k, v]) => v && v.primary_key === true).map(([k]) => k);
@@ -77,12 +123,17 @@ class ModelInstance {
             }
             if (!whereClause) whereClause = generateCondition(formatObject(rec), false, this.schema);
         } catch (e) {
-            whereClause = generateCondition(formatObject(this.getRecordData()), false, this.schema);
+            // Fallback de sécurité au cas où
+            let fallbackRec = this.getRecordData();
+            if (Array.isArray(fallbackRec)) fallbackRec = fallbackRec[0];
+            if (typeof fallbackRec === 'string') { try { fallbackRec = JSON.parse(fallbackRec); } catch (e) { } }
+            whereClause = generateCondition(formatObject(fallbackRec), false, this.schema);
         }
+
         const sql_request = `UPDATE ${this.name} SET ${setClause} WHERE ${whereClause}`;
 
         const [result] = await getConnexion().promise().query(sql_request).catch((err) => {
-            error(`Error executing query: ${err}`);
+            error(`Error executing query updateOne: ${err}`);
             throw err;
         });
 
@@ -117,7 +168,7 @@ class ModelInstance {
 
                 resolve(1);
             }).catch((err) => {
-                error(`Error executing query: ${err}`);
+                error(`Error executing query delete: ${err}`);
                 return 0;
             });
         });
@@ -137,7 +188,7 @@ class ModelInstance {
 
                 resolve(1);
             }).catch((err) => {
-                error(`Error executing query: ${err}`);
+                error(`Error executing query deleteOne: ${err}`);
                 return 0;
             });
         });
@@ -154,7 +205,7 @@ class ModelInstance {
             await getConnexion().promise().query(custom).then((rows) => {
                 if (rows.length == 0) return resolve(0);
 
-                resolve(new ModelInstance(this.name, rows[0], this.schema));
+                resolve(new ModelInstance(this.name, rows, this.schema)).data;
             }).catch((err) => {
                 error(`Error executing query: ${err}`);
                 return;
@@ -163,4 +214,4 @@ class ModelInstance {
     }
 }
 
-module.exports = {ModelInstance}
+module.exports = { ModelInstance }
