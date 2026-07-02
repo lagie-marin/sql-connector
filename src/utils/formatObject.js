@@ -2,7 +2,7 @@ const { getSafe, setSafe } = require("./security/safe");
 
 module.exports = function (obj) {
     for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
             const value = getSafe(obj, key);
             if (value instanceof Date) {
                 // convert Date to MySQL DATETIME (no timezone)

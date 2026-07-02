@@ -3,7 +3,6 @@ const { getConnexion } = require("../db/connexion");
 const formatObject = require("../utils/formatObject");
 const generateCondition = require("../utils/generateCondition");
 const util = require("util");
-const { serveur } = require("@mlagie/logger");
 const { getSafe, setSafe } = require("../utils/security/safe");
 
 /**
@@ -45,7 +44,7 @@ class ModelInstance {
                     get: () => {
                         const val = getSafe(row, key);
                         if (typeof val === 'string' && val.trim().startsWith('{') && val.trim().endsWith('}')) {
-                            try { return JSON.parse(val); } catch (e) { return val; }
+                            try { return JSON.parse(val); } catch { return val; }
                         }
                         return val;
                     },
@@ -99,13 +98,15 @@ class ModelInstance {
             if (typeof rawRec === 'string') {
                 try {
                     rawRec = JSON.parse(rawRec);
-                } catch (e) {  }
+                } catch {
+                    rawRec = recordsArray;
+                }
             }
             const rec = rawRec;
 
             const schemaDict = this.schema && this.schema.schemaDict ? this.schema.schemaDict : null;
             if (schemaDict) {
-                const pkKeys = Object.entries(schemaDict).filter(([k, v]) => v && v.primary_key === true).map(([k]) => k);
+                const pkKeys = Object.entries(schemaDict).filter(([, v]) => v && v.primary_key === true).map(([k]) => k);
                 if (pkKeys.length > 0) {
                     const pkObj = {};
                     for (const k of pkKeys) {
@@ -115,10 +116,11 @@ class ModelInstance {
                 }
             }
             if (!whereClause) whereClause = generateCondition(formatObject(rec), false, this.schema);
-        } catch (e) {
-            let fallbackRec = this.getRecordData();
+        } catch {
+            const originalFallbackRec = this.getRecordData();
+            let fallbackRec = originalFallbackRec;
             if (Array.isArray(fallbackRec)) fallbackRec = fallbackRec[0];
-            if (typeof fallbackRec === 'string') { try { fallbackRec = JSON.parse(fallbackRec); } catch (e) { } }
+            if (typeof fallbackRec === 'string') { try { fallbackRec = JSON.parse(fallbackRec); } catch { fallbackRec = originalFallbackRec; } }
             whereClause = generateCondition(formatObject(fallbackRec), false, this.schema);
         }
 
@@ -152,17 +154,12 @@ class ModelInstance {
     async delete(filter) {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
 
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then((rows) => {
-
-                if (rows[1] != undefined) return resolve(0);
-
-                resolve(1);
-            }).catch((err) => {
-                error(`Error executing query delete: ${err}`);
-                return 0;
-            });
+        const rows = await getConnexion().promise().query(sql_request).catch((err) => {
+            error(`Error executing query delete: ${err}`);
+            throw err;
         });
+
+        return rows[1] != undefined ? 0 : 1;
     }
 
     /**
@@ -173,16 +170,12 @@ class ModelInstance {
     async deleteOne() {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(this.getRecordData()))}`;
 
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then((rows) => {
-                if (rows[1] != undefined) return resolve(0);
-
-                resolve(1);
-            }).catch((err) => {
-                error(`Error executing query deleteOne: ${err}`);
-                return 0;
-            });
+        const rows = await getConnexion().promise().query(sql_request).catch((err) => {
+            error(`Error executing query deleteOne: ${err}`);
+            throw err;
         });
+
+        return rows[1] != undefined ? 0 : 1;
     }
 
     /**
@@ -192,16 +185,14 @@ class ModelInstance {
      * @throws {Error} Throws an error if query execution fails.
      */
     async customRequest(custom) {
-        return new Promise(async (resolve, reject) => {
-            await getConnexion().promise().query(custom).then((rows) => {
-                if (rows.length == 0) return resolve(0);
-
-                resolve(new ModelInstance(this.name, rows, this.schema)).data;
-            }).catch((err) => {
-                error(`Error executing query: ${err}`);
-                return;
-            });
+        const rows = await getConnexion().promise().query(custom).catch((err) => {
+            error(`Error executing query: ${err}`);
+            throw err;
         });
+
+        if (rows.length == 0) return 0;
+
+        return new ModelInstance(this.name, rows, this.schema).data;
     }
 }
 

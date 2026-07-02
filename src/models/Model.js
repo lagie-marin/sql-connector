@@ -54,35 +54,6 @@ function formatDefaultSql(defaultValue, fieldType) {
     return `DEFAULT "${String(defaultValue).replace(/"/g, '\\"')}"`;
 }
 
-function normalizeDefaultValue(defaultValue, fieldType) {
-    if (defaultValue === undefined) return null;
-    if (defaultValue === null) return "null";
-
-    if (typeof defaultValue === "function") {
-        if (isDateLikeType(fieldType)) return "current_timestamp";
-        return normalizeDefaultValue(defaultValue(), fieldType);
-    }
-
-    if (defaultValue instanceof Date) {
-        return defaultValue.toISOString().slice(0, 19).replace("T", " ");
-    }
-
-    if (isSqlTemporalDefault(defaultValue)) return "current_timestamp";
-    if (typeof defaultValue === "boolean") return defaultValue ? "1" : "0";
-    if (typeof defaultValue === "object") return JSON.stringify(defaultValue);
-
-    return String(defaultValue);
-}
-
-function normalizeDbDefaultValue(defaultValue) {
-    if (defaultValue === null || defaultValue === undefined) return null;
-
-    const normalizedValue = String(defaultValue).trim();
-    if (/^current_timestamp(\(\))?$/i.test(normalizedValue)) return "current_timestamp";
-    if (/^now\(\)$/i.test(normalizedValue)) return "current_timestamp";
-    return normalizedValue;
-}
-
 function generateValueSQL(value) {
     return value.map(item => {
         if (item === null) return 'NULL';
@@ -121,7 +92,7 @@ function getColumnDefinition(fieldName, field) {
     }
 
     const fieldType = getFieldType(field);
-    let colDef = "";
+    let colDef;
 
     if (Array.isArray(field.enum) && field.enum.length > 0) {
         const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
@@ -166,9 +137,9 @@ class Model {
      * @returns {Promise<void>}
      */
     static async syncAllTables() {
-        // Dépendances : {table: [tables dont elle dépend]}
         const dependencies = {};
         const modelMap = {};
+
         for (const model of Model.pendingModels) {
             modelMap[model.name] = model;
             dependencies[model.name] = [];
@@ -181,8 +152,6 @@ class Model {
         }
 
         const conn = getConnexion();
-        const [dbTablesRows] = await conn.promise().query("SHOW TABLES");
-        const dbTables = dbTablesRows.map(row => Object.values(row)[0]);
 
         const sorted = [];
         const visited = {};
@@ -342,18 +311,17 @@ class Model {
 
         const query = `SELECT ${buildSelect(select)} FROM ${this.name}${joinClause} ${buildQueryParts(options)}`;
 
-        return new Promise(async (resolve, reject) => {
-            await getConnexion().promise().query(query).then((result) => {
-                const rows = result && Array.isArray(result) ? result[0] : result;
-                if (!rows || rows.length === 0) return resolve([]);
+        try {
+            const result = await getConnexion().promise().query(query);
+            const rows = result && Array.isArray(result) ? result[0] : result;
 
-                const instances = rows.map(row => new ModelInstance(this.name, row, this.schema));
-                resolve(instances);
-            }).catch((err) => {
-                error(`Error executing auto-prefixed find: ${err}`);
-                reject(err);
-            });
-        });
+            if (!rows || rows.length === 0) return [];
+
+            return rows.map(row => new ModelInstance(this.name, row, this.schema));
+        } catch (err) {
+            error(`Error executing auto-prefixed find: ${err}`);
+            throw err;
+        }
     }
 
     /**
@@ -372,16 +340,16 @@ class Model {
      * @throws {Error} Throws an error if query execution fails.
      */
     async customRequest(custom, custom_err_name = "") {
-        return new Promise(async (resolve, reject) => {
-            await getConnexion().promise().query(custom).then((rows) => {
-                if (rows.length == 0) return resolve(0);
+        try {
+            const rows = await getConnexion().promise().query(custom);
 
-                resolve(new ModelInstance(this.name, rows, this.schema));
-            }).catch((err) => {
-                error(`Error executing query ${custom_err_name}: ${err}`);
-                return;
-            });
-        })
+            if (rows.length == 0) return 0;
+
+            return new ModelInstance(this.name, rows, this.schema);
+        } catch (err) {
+            error(`Error executing query ${custom_err_name}: ${err}`);
+            throw err;
+        }
     }
 
     /**
