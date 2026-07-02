@@ -19,7 +19,7 @@ jobs:
         run: npm ci
       - name: Audit deps
         continue-on-error: false
-        run: | 
+        run: |
           npm audit
       - name: Check security of module
         continue-on-error: false
@@ -39,5 +39,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-          scope: '@mlagie'
-        run: npm install -g npm@latest && npm ci && npm publish --provenance --access public
+          scope: "@mlagie"
+      - name: Update npm and Publish
+        run: |
+          npm install -g npm@latest
+          npm ci
+          npm publish --provenance --access public
