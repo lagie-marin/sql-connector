@@ -3,12 +3,10 @@ const { sqlTypeMap } = require("../utils/sqlTypeMap");
 const { getConnexion } = require("../db/connexion");
 const generateCondition = require("../utils/generateCondition");
 const formatObject = require("../utils/formatObject");
-const fs = require('fs');
-const path = require('path');
-const glob = require('glob');
 const { ModelInstance } = require("./ModelInstance");
 const { buildSelect, buildQueryParts } = require("../utils/buildQuery");
 const util = require("util");
+const { getSafe, setSafe } = require("../utils/security/safe");
 
 function getFieldType(field) {
     if (typeof field === "object") {
@@ -129,8 +127,9 @@ function getColumnDefinition(fieldName, field) {
         const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
         colDef = `ENUM(${enumValues})`;
     } else {
-        if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
-        colDef = `${sqlTypeMap[fieldType]}${(sqlTypeMap[fieldType] == "VARCHAR" || sqlTypeMap[fieldType] == "INT") ? `(${field.length > 0 ? field.length : 255})` : ""}`;
+        const type = getSafe(sqlTypeMap, fieldType);
+        if (!type) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
+        colDef = `${type}${(type == "VARCHAR" || type == "INT") ? `(${field.length > 0 ? field.length : 255})` : ""}`;
     }
     if (field.required) colDef += ' NOT NULL';
     const defaultDefinition = formatDefaultSql(field.default, fieldType);
@@ -181,7 +180,6 @@ class Model {
             }
         }
 
-        // Récupère toutes les tables existantes dans la base
         const conn = getConnexion();
         const [dbTablesRows] = await conn.promise().query("SHOW TABLES");
         const dbTables = dbTablesRows.map(row => Object.values(row)[0]);
@@ -190,53 +188,23 @@ class Model {
         const sorted = [];
         const visited = {};
         function visit(table) {
-            if (visited[table] === true) return;
-            if (visited[table] === 'temp') throw new Error('Cyclic foreign key dependency detected');
-            visited[table] = 'temp';
-            for (const dep of dependencies[table]) {
-                if (modelMap[dep]) visit(dep);
+            if (getSafe(visited, table) === true) return;
+            if (getSafe(visited, table) === 'temp') throw new Error('Cyclic foreign key dependency detected');
+            setSafe(visited, table, 'temp');
+            const deps = getSafe(dependencies, table)
+            for (const dep of deps) {
+                if (getSafe(modelMap, dep)) visit(dep);
             }
-            visited[table] = true;
+            setSafe(visited, table, true);
             sorted.push(table);
         }
         for (const table of Object.keys(dependencies)) {
-            if (!visited[table]) visit(table);
+            if (!getSafe(visited, table)) visit(table);
         }
 
-        // --- Détruit les tables qui n'ont plus de schéma ---
-        for (const dbTable of dbTables) {
-            if (!modelMap[dbTable]) {
-                try {
-                    const backupPath = `./backup_${dbTable}_${Date.now()}.sql`;
-                    // Sauvegarde rapide en SQL (INSERTs)
-                    const [rows] = await conn.promise().query(`SELECT * FROM \`${dbTable}\``);
-                    if (rows.length > 0) {
-                        const columns = Object.keys(rows[0]).map(col => `\`${col}\``).join(', ');
-                        const values = rows.map(row =>
-                            '(' + Object.values(row).map(val =>
-                                val === null ? 'NULL' : conn.escape(val)
-                            ).join(', ') + ')'
-                        ).join(',\n');
-                        const insertSQL = `INSERT INTO \`${dbTable}\` (${columns}) VALUES${values};\n`;
-                        fs.writeFileSync(backupPath, insertSQL, 'utf-8');
-                        logs(`Sauvegarde SQL de la table '${dbTable}' effectuée dans '${backupPath}'.`);
-                    } else {
-                        logs(`Table '${dbTable}' vide, fichier '${backupPath}' créé.`);
-                    }
-                } catch (err) {
-                    error(`Erreur lors de la sauvegarde SQL de la table '${dbTable}': ${err}`);
-                }
-                logs(`Table '${dbTable}' n'a plus de schéma associé, suppression...`);
-                await conn.promise().query(`DROP TABLE IF EXISTS \`${dbTable}\``);
-                logs(`Table '${dbTable}' supprimée.`);
-            }
-        }
-
-        // Création/synchronisation des tables dans l'ordre
         for (const table of sorted) {
-            const model = modelMap[table];
+            const model = getSafe(modelMap, table);
 
-            // 1. Crée la table si elle n'existe pas (version avec promesses)
             try {
                 await conn.promise().query(model.generateCreateTableStatement(model.schema.schemaDict));
                 await logs(`La table ${model.name} a été créée ou existe déjà`);
@@ -244,221 +212,7 @@ class Model {
                 error(`Error creating table: ${err} with table name: ${model.name}`);
                 throw err;
             }
-
-            if (dangerousSync) {
-                // --- Restauration automatique si backup SQL trouvé ---
-                const backupPattern = `./backup_${model.name}_*.sql`;
-                const backupFiles = glob.sync(backupPattern).filter(f => !f.endsWith('.ignored'));
-                if (backupFiles.length > 0) {
-                    const latestBackup = backupFiles.sort().reverse()[0];
-                    const readline = require('readline');
-                    const rl = readline.createInterface({
-                        input: process.stdin,
-                        output: process.stdout
-                    });
-
-                    // Demande restauration
-                    const answer = await new Promise((resolve) => {
-                        rl.question(
-                            `Un backup a été trouvé pour la table '${model.name}' (${latestBackup}). Voulez-vous restaurer les données ? (y/N) `,
-                            (answer) => {
-                                resolve(answer.trim().toLowerCase());
-                            }
-                        );
-                    });
-
-                    if (answer === 'y') {
-                        try {
-                            const sqlContent = fs.readFileSync(latestBackup, 'utf-8');
-                            await conn.promise().query(sqlContent);
-                            await logs(`Backup restauré pour la table '${model.name}'.`);
-                        } catch (err) {
-                            error(`Erreur lors de la restauration du backup pour '${model.name}': ${err}`);
-                        }
-                    }
-
-                    // Toujours demander la suppression après restauration ou non
-                    await new Promise((resolve) => {
-                        rl.question(
-                            `Voulez-vous supprimer le fichier de backup '${latestBackup}' ? (y/N) `,
-                            (delAnswer) => {
-                                if (delAnswer.trim().toLowerCase() === 'y') {
-                                    fs.unlinkSync(latestBackup);
-                                    logs(`Backup supprimé : ${latestBackup}`);
-                                } else {
-                                    // Renomme le fichier pour ne plus proposer la restauration
-                                    fs.renameSync(latestBackup, latestBackup + '.ignored');
-                                    logs(`Backup ignoré pour la table '${model.name}'. Il ne sera plus proposé.`);
-                                }
-                                rl.close();
-                                resolve();
-                            }
-                        );
-                    });
-                }
-
-                // 2. Synchronise les colonnes (renommage, ajout, suppression)
-                const [columns] = await conn.promise().query(
-                    `SHOW COLUMNS FROM \`${model.name}\``
-                );
-                let existingCols = columns.map(col => col.Field);
-
-                for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
-                    if (existingCols.includes(fieldName)) {
-                        // 1. Récupère infos colonne
-                        const currentCol = columns.find(col => col.Field === fieldName);
-                        const [indexes] = await conn.promise().query(
-                            `SHOW INDEX FROM \`${model.name}\` WHERE Column_name = ?`, [fieldName]
-                        );
-
-                        // 2. Vérifie les propriétés principales avec plus de précision
-                        let needModify = false;
-
-                        // --- Vérification du TYPE ---
-                        const fieldType = getFieldType(field);
-                        let expectedTypeDef;
-
-                        if (Array.isArray(field.enum) && field.enum.length > 0) {
-                            // Pour les ENUM, on compare la définition complète
-                            const enumValues = field.enum.map(v => `'${v.replace(/'/g, "''")}'`).join(", ");
-                            expectedTypeDef = `enum(${enumValues})`;
-                        } else {
-                            // Pour les autres types
-                            if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${fieldType}.`);
-
-                            expectedTypeDef = sqlTypeMap[fieldType];
-                            if (sqlTypeMap[fieldType] === "VARCHAR" || sqlTypeMap[fieldType] === "INT") {
-                                const length = field.length > 0 ? field.length : 255;
-                                expectedTypeDef += `(${length})`;
-                            }
-                        }
-
-                        // Normalisation pour la comparaison (minuscules, suppression des espaces)
-                        const normalizeType = (typeStr) => {
-                            return typeStr.toLowerCase().replace(/\s+/g, '').replace(/`/g, '');
-                        };
-
-                        const currentTypeNormalized = normalizeType(currentCol.Type);
-                        const expectedTypeNormalized = normalizeType(expectedTypeDef);
-
-                        if (currentTypeNormalized !== expectedTypeNormalized) {
-                            logs(`Type mismatch for ${fieldName}: DB has '${currentCol.Type}', expected '${expectedTypeDef}'`);
-                            needModify = true;
-                        }
-
-                        // --- Vérification NULL/NOT NULL ---
-                        const shouldBeNotNull = field.required === true || field.primary_key === true;
-                        const isNullableInDB = currentCol.Null === "YES";
-
-                        if (shouldBeNotNull && isNullableInDB) {
-                            logs(`Nullability mismatch for ${fieldName}: DB allows NULL, expected NOT NULL`);
-                            needModify = true;
-                        }
-                        if (!shouldBeNotNull && !isNullableInDB) {
-                            logs(`Nullability mismatch for ${fieldName}: DB is NOT NULL, expected NULL allowed`);
-                            needModify = true;
-                        }
-
-                        // --- Vérification DEFAULT VALUE ---
-                        const expectedDefault = normalizeDefaultValue(field.default, fieldType);
-                        const currentDefault = normalizeDbDefaultValue(currentCol.Default);
-
-                        // Gestion spéciale pour les valeurs par défaut
-                        if (expectedDefault !== null && currentDefault === null) {
-                            logs(`Default value mismatch for ${fieldName}: DB has NULL, expected '${expectedDefault}'`);
-                            needModify = true;
-                        } else if (expectedDefault === null && currentDefault !== null) {
-                            logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected NULL`);
-                            needModify = true;
-                        } else if (expectedDefault !== null && currentDefault !== null) {
-                            // Comparaison stringifiée pour éviter les problèmes de type
-                            if (String(expectedDefault) !== String(currentDefault)) {
-                                logs(`Default value mismatch for ${fieldName}: DB has '${currentDefault}', expected '${expectedDefault}'`);
-                                needModify = true;
-                            }
-                        }
-
-                        // --- Vérification UNIQUE constraint ---
-                        const isUniqueInDB = indexes.some(idx => idx.Non_unique === 0 && idx.Key_name !== 'PRIMARY');
-                        if (!!field.unique !== isUniqueInDB) {
-                            logs(`Unique constraint mismatch for ${fieldName}: DB has unique=${isUniqueInDB}, expected=${!!field.unique}`);
-                            needModify = true;
-                        }
-
-                        // --- Vérification PRIMARY KEY ---
-                        const isPrimaryInDB = indexes.some(idx => idx.Key_name === 'PRIMARY');
-                        if (!!field.primary_key !== isPrimaryInDB) {
-                            logs(`Primary key mismatch for ${fieldName}: DB has PK=${isPrimaryInDB}, expected=${!!field.primary_key}`);
-                            needModify = true;
-                        }
-
-                        // --- Vérification AUTO_INCREMENT ---
-                        const isAutoIncrementInDB = currentCol.Extra.toLowerCase().includes('auto_increment');
-                        if (!!field.auto_increment !== isAutoIncrementInDB) {
-                            logs(`Auto increment mismatch for ${fieldName}: DB has AI=${isAutoIncrementInDB}, expected=${!!field.auto_increment}`);
-                            needModify = true;
-                        }
-
-                        // 3. Si différence, on modifie
-                        if (needModify) {
-                            try {
-                                const newColDef = getColumnDefinition(fieldName, field);
-                                const alterSQL = `ALTER TABLE \`${model.name}\` MODIFY COLUMN ${newColDef}`;
-                                logs(`Modifying column ${fieldName}: ${alterSQL}`);
-                                await conn.promise().query(alterSQL);
-                                logs(`Column ${fieldName} modified successfully`);
-                            } catch (err) {
-                                error(`Error modifying column ${fieldName}: ${err}`);
-                            }
-                        }
-                    }
-                    // --- Warn si oldName est présent dans le schéma ---
-                    if (field.oldName) {
-                        logs(`⚠️  Pensez à retirer la propriété 'oldName' du champ '${fieldName}' dans le schéma JS de '${model.name}' pour éviter des renommages inutiles à l'avenir.`);
-                    }
-                }
-
-                // --- Étape 1 : Renommage des colonnes ---
-                for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
-                    if (field.oldName && existingCols.includes(field.oldName) && !existingCols.includes(fieldName)) {
-                        // Génère la définition SQL de la nouvelle colonne
-                        let colDef = getColumnDefinition(fieldName, field);
-
-                        // Renomme la colonne
-                        const alterSQL = `ALTER TABLE \`${model.name}\` CHANGE COLUMN \`${field.oldName}\` ${colDef}`;
-                        await conn.promise().query(alterSQL);
-                        logs(`Colonne ${field.oldName} renommée en ${fieldName} dans ${model.name}`);
-                        // Mets à jour existingCols pour la suite
-                        existingCols = existingCols.map(col => col === field.oldName ? fieldName : col);
-                    }
-                }
-
-                // --- Étape 2 : Ajout des colonnes manquantes ---
-                for (const [fieldName, field] of Object.entries(model.schema.schemaDict)) {
-                    if (!existingCols.includes(fieldName)) {
-                        let colDef = getColumnDefinition(fieldName, field);
-
-                        // Ajoute la colonne
-                        const alterSQL = `ALTER TABLE \`${model.name}\` ADD COLUMN ${colDef}`;
-                        await conn.promise().query(alterSQL);
-                        logs(`Colonne ${fieldName} ajoutée à ${model.name}`);
-                        existingCols.push(fieldName);
-                    }
-                }
-
-                // --- Étape 3 : Suppression des colonnes orphelines (dangerousSync) ---
-                if (dangerousSync) {
-                    for (const col of existingCols) {
-                        if (!Object.keys(model.schema.schemaDict).includes(col)) {
-                            const alterSQL = `ALTER TABLE \`${model.name}\` DROP COLUMN \`${col}\``;
-                            await conn.promise().query(alterSQL);
-                            logs(`Colonne ${col} supprimée de ${model.name}`);
-                        }
-                    }
-                }
-            }
         }
-        // Vide la liste d'attente
         Model.pendingModels = [];
     }
 
@@ -471,7 +225,7 @@ class Model {
     generateCreateTableStatement(schema) {
         let foreignKey = [];
         const columns = Object.keys(schema).map(fieldName => {
-            const field = schema[fieldName];
+            setSafe(field, schema, fieldName);
             let lengthDefault = 255;
 
             if (!field.type && typeof field == "object" && !(Array.isArray(field.enum) && field.enum.length > 0)) throw new Error(`Field ${fieldName} has no type defined.`);
@@ -479,7 +233,6 @@ class Model {
             const fieldType = getFieldType(field);
 
             if (field.type && typeof field == "object") {
-                // Si c'est un enum, ne pas vérifier sqlTypeMap
                 return getColumnDefinition(fieldName, field);
             }
             if (Array.isArray(field.enum) && field.enum.length > 0) {
@@ -487,9 +240,11 @@ class Model {
                 return `${fieldName} ENUM(${enumValues})`;
             }
 
-            if (!sqlTypeMap[fieldType]) throw new Error(`Field ${fieldName} has unsupported type ${field}`);
+            const type = getSafe(sqlTypeMap, fieldType);
 
-            return `${fieldName} ${sqlTypeMap[fieldType] == "VARCHAR" ? `${sqlTypeMap[fieldType]}(${lengthDefault})` : sqlTypeMap[fieldType]}`;
+            if (!type) throw new Error(`Field ${fieldName} has unsupported type ${field}`);
+
+            return `${fieldName} ${type == "VARCHAR" ? `${type}(${lengthDefault})` : type}`;
         });
         if (ifReservedKeywords(this.name)) {
             error("Error: Invalid table name. Please choose a different name that is not a reserved keyword in SQL_request");
@@ -530,32 +285,73 @@ class Model {
     }
 
     /**
+     * @typedef {Object} SelectAggregation
+     * @property {string} [sum] - Le nom de la colonne à additionner (ex: "total_runs").
+     * @property {string} [count] - Le nom de la colonne à compter.
+     * @property {string[]} [dateFormat] - Tableau avec [colonne, format] (ex: ["date_day", "%Y-%m-%d"]).
+     * @property {string} as - L'alias de sortie pour le champ SQL (ex: "total_runs" ou "period").
+     */
+
+    /**
      * Retrieves multiple entries from the table.
      * @param {Object} [options] - Query options (attributes, where, order, limit).
-     * @param {string[]} [options.select] - Champs à retourner.Champs à retourner.
+     * @param {Array<string|SelectAggregation>} [options.select] - Champs à retourner.Champs à retourner.
      * @param {Object} [options.where] - Filters (key/value).
      * @param {Array} [options.order] - Ex: [['points', 'DESC']]
-     * @param {number} [options.limit] - Limite de résultats.
+     * @param {number} [options.limit] - Result limit.
+     * @param {Object} [options.join] - Join options.
+     * @param {String} [options.join.table] - Table to join.
+     * @param {String} [options.join.on] - Join condition.
+     * @param {String} [options.join.alias] - Alias for the joined table.
      * @returns {Promise<Array<ModelInstance>>}
      */
     async find(options = {}) {
-        const { select } = options;
-        const query = `SELECT ${buildSelect(select)} FROM ${this.name} ${buildQueryParts(options)}`;
+        let { select, join } = options;
+
+        if (join && join.table && select) {
+            select = select.map(item => {
+                if (typeof item === 'string') {
+                    if (!item.includes('.')) {
+                        if (item.startsWith('name')) {
+                            return `${join.table}.${item}`;
+                        }
+                        return `${this.name}.${item}`;
+                    }
+                }
+                else if (typeof item === 'object') {
+                    const key = Object.keys(item)[0];
+
+                    if (Array.isArray(getSafe(item, key))) {
+                        setSafe(item, key, getSafe(item, key).map((param, index) => {
+                            if (index === 0 && typeof param === 'string' && !param.includes('.')) {
+                                return `${this.name}.${param}`;
+                            }
+                            return param;
+                        }));
+                    }
+                    else if (typeof getSafe(item, key) === 'string' && !getSafe(item, key).includes('.')) {
+                        setSafe(item, key, `${this.name}.${getSafe(item, key)}`);
+                    }
+                }
+                return item;
+            });
+        }
+        let joinClause = "";
+        if (join && join.table && join.on) {
+            joinClause = ` INNER JOIN ${join.table} ON ${join.on}`;
+        }
+
+        const query = `SELECT ${buildSelect(select)} FROM ${this.name}${joinClause} ${buildQueryParts(options)}`;
 
         return new Promise(async (resolve, reject) => {
             await getConnexion().promise().query(query).then((result) => {
-                // Le driver mysql2 renvoie [rows, fields], on isole le tableau de lignes 'rows'
                 const rows = result && Array.isArray(result) ? result[0] : result;
-
-                // S'il n'y a aucun résultat, on renvoie un tableau vide [] (et pas 0, c'est plus propre pour faire des .length)
                 if (!rows || rows.length === 0) return resolve([]);
 
-                // 🚀 LE DÉCALAGE : On transforme chaque ligne brute en une ModelInstance unique
                 const instances = rows.map(row => new ModelInstance(this.name, row, this.schema));
-
                 resolve(instances);
             }).catch((err) => {
-                error(`Error executing query find: ${err}`);
+                error(`Error executing auto-prefixed find: ${err}`);
                 reject(err);
             });
         });

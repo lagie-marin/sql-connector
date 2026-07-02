@@ -93,13 +93,9 @@ const userSchema = new Schema({
 `Model.syncAllTables()` compare les schémas JS avec la base et applique uniquement les différences utiles.
 
 - Ajout de colonne: automatique.
-- Suppression de colonne: uniquement avec `dangerousSync: true`.
-- Renommage de colonne: possible avec `oldName`.
-- Tables orphelines: sauvegarde avant suppression dans un fichier `backup_*.sql`.
 
 ```javascript
 await Model.syncAllTables();
-await Model.syncAllTables({ dangerousSync: true });
 ```
 
 Point important: ne combinez pas `primary_key: true` et `unique: true` sur le même champ. Une clé primaire est déjà unique et non nulle.

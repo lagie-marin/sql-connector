@@ -4,6 +4,7 @@ const formatObject = require("../utils/formatObject");
 const generateCondition = require("../utils/generateCondition");
 const util = require("util");
 const { serveur } = require("@mlagie/logger");
+const { getSafe, setSafe } = require("../utils/security/safe");
 
 /**
  * Represents an instance of a database model.
@@ -40,21 +41,19 @@ class ModelInstance {
         const row = this._getTargetRow();
         if (row && typeof row === 'object') {
             Object.keys(row).forEach(key => {
-                // On lie dynamiquement la clé de l'instance directement à la case mémoire de 'row'
                 Object.defineProperty(this, key, {
                     get: () => {
-                        const val = row[key];
-                        // Auto-parse propre du JSON si la colonne MySQL stocke une String JSON
+                        // Utilisation du getter sécurisé
+                        const val = getSafe(row, key);
                         if (typeof val === 'string' && val.trim().startsWith('{') && val.trim().endsWith('}')) {
                             try { return JSON.parse(val); } catch (e) { return val; }
                         }
                         return val;
                     },
                     set: (newVal) => {
-                        // L'écriture modifie directement la référence d'origine dans 'row'
-                        row[key] = newVal;
+                        setSafe(row, key, newVal);
                     },
-                    enumerable: true, // Permet à JSON.stringify et console.log de voir la propriété
+                    enumerable: true,
                     configurable: true
                 });
             });
@@ -94,19 +93,14 @@ class ModelInstance {
 
         let whereClause;
         try {
-            // 1. On récupère le tableau de données
             const recordsArray = this.getRecordData();
 
-            // 2. On extrait le premier élément (la ligne actuelle)
             let rawRec = Array.isArray(recordsArray) ? recordsArray[0] : recordsArray;
 
-            // 3. Si cet élément est une chaîne JSON, on le transforme en vrai objet JS
             if (typeof rawRec === 'string') {
                 try {
                     rawRec = JSON.parse(rawRec);
-                } catch (e) {
-                    // Pas du JSON valide, on garde la string d'origine
-                }
+                } catch (e) {  }
             }
             const rec = rawRec;
 
@@ -116,14 +110,13 @@ class ModelInstance {
                 if (pkKeys.length > 0) {
                     const pkObj = {};
                     for (const k of pkKeys) {
-                        if (rec && Object.prototype.hasOwnProperty.call(rec, k)) pkObj[k] = rec[k];
+                        if (rec && Object.prototype.hasOwnProperty.call(rec, k)) setSafe(pkObj, k, getSafe(rec, k));
                     }
                     if (Object.keys(pkObj).length > 0) whereClause = generateCondition(formatObject(pkObj), false, this.schema);
                 }
             }
             if (!whereClause) whereClause = generateCondition(formatObject(rec), false, this.schema);
         } catch (e) {
-            // Fallback de sécurité au cas où
             let fallbackRec = this.getRecordData();
             if (Array.isArray(fallbackRec)) fallbackRec = fallbackRec[0];
             if (typeof fallbackRec === 'string') { try { fallbackRec = JSON.parse(fallbackRec); } catch (e) { } }
@@ -139,7 +132,6 @@ class ModelInstance {
 
         const affected = result && (result.affectedRows !== undefined ? result.affectedRows : 0);
 
-        // Update in-memory data if DB was modified
         if (affected > 0) {
             const record = this.getRecordData();
             if (Array.isArray(this.data)) {

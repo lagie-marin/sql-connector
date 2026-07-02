@@ -1,3 +1,5 @@
+const { getSafe } = require("./security/safe");
+
 /**
  * Generates an SQL_request condition from a filter object.
  * 
@@ -19,17 +21,17 @@ module.exports = function (filter, isUpdate = false, schema = null) {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
 
-    const filteredKeys = isUpdate ? keys.filter(key => filter[key] !== undefined) : keys;
-    const filteredValues = isUpdate ? filteredKeys.map(key => filter[key]) : values;
+    const filteredKeys = isUpdate ? keys.filter(key => getSafe(filter, key) !== undefined) : keys;
+    const filteredValues = isUpdate ? filteredKeys.map(key => getSafe(filter, key)) : values;
 
     if (!isUpdate && schema && schema.schemaDict) {
         const uniqueKeys = filteredKeys.filter(key => {
-            const field = schema.schemaDict[key];
+            const field = getSafe(schema.schemaDict, key);
             return field && field.unique === true;
         });
         if (uniqueKeys.length > 0) {
             return uniqueKeys.map(key => {
-                let value = filter[key];
+                let value = getSafe(filter, key);
                 // normalize strings that may contain surrounding quotes or escaped quotes
                 if (typeof value === 'string') {
                     value = value.trim();
@@ -58,7 +60,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
 
     // Comportement par défaut
     const conditions = filteredKeys.map((key, index) => {
-        let value = filteredValues[index];
+        let value = getSafe(filteredValues, index);
 
         if (typeof value === 'string') {
             value = value.trim();
@@ -82,7 +84,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         if ((value === null || value === "null") && isUpdate == false) return `${key} IS NULL`;
 
         // handle date-like strings when schema tells us the field is temporal
-        const fieldDef = schema && schema.schemaDict ? schema.schemaDict[key] : null;
+        const fieldDef = schema && schema.schemaDict ? getSafe(schema.schemaDict, key) : null;
         let fieldType = null;
         if (fieldDef) {
             if (fieldDef.type && fieldDef.type.name !== undefined) fieldType = fieldDef.type.name;

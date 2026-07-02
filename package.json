@@ -1,10 +1,10 @@
 {
   "name": "@mlagie/sql-connector",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "description": "Le module sql-connector permet de gérer les connexions à une base de données MySQL, de définir des schémas de tables, et d'interagir avec les données de manière simple et efficace.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "security": "npx eslint ."
   },
   "repository": {
     "type": "git",
@@ -38,5 +38,9 @@
     "@mlagie/logger": "1.0.2",
     "glob": "^13.0.6",
     "mysql2": "3.22.5"
+  },
+  "devDependencies": {
+    "eslint": "^10.6.0",
+    "eslint-plugin-security": "^4.0.1"
   }
 }

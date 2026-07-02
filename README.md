@@ -128,13 +128,9 @@ const userSchema = new Schema({
 `Model.syncAllTables()` compares JS schemas with the database and applies only meaningful differences.
 
 - New columns are added automatically.
-- Removed columns are only dropped with `dangerousSync: true`.
-- Column renames are supported through `oldName`.
-- Orphan tables are backed up to a `backup_*.sql` file before deletion.
 
 ```javascript
 await Model.syncAllTables();
-await Model.syncAllTables({ dangerousSync: true });
 ```
 
 Important: do not set both `primary_key: true` and `unique: true` on the same field. A primary key is already unique and not null.

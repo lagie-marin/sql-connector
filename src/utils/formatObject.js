@@ -1,10 +1,12 @@
+const { getSafe, setSafe } = require("./security/safe");
+
 module.exports = function (obj) {
     for (const key in obj) {
         if (obj.hasOwnProperty(key)) {
-            const value = obj[key];
+            const value = getSafe(obj, key);
             if (value instanceof Date) {
                 // convert Date to MySQL DATETIME (no timezone)
-                obj[key] = value.toISOString().slice(0, 19).replace('T', ' ');
+                setSafe(obj, key, value.toISOString().slice(0, 19).replace('T', ' '));
                 continue;
             }
 
@@ -17,13 +19,13 @@ module.exports = function (obj) {
                 }
                 // unescape common escaped quotes
                 v = v.replace(/\\"/g, '"').replace(/\\'/g, "'");
-                obj[key] = v;
+                setSafe(obj, key, v);
                 continue;
             }
 
             if (typeof value === "object") {
                 // stringify objects and escape single quotes for SQL safety
-                obj[key] = JSON.stringify(value).replace(/'/g, "\\'");
+                setSafe(obj, key, JSON.stringify(value).replace(/'/g, "\\'"));
             }
         }
     }
