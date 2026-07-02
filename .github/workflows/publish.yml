@@ -2,13 +2,14 @@ name: Publish Package
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    if: github.event.base_ref == 'refs/heads/main'
 
     permissions:
       contents: read
@@ -23,5 +24,6 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - run: npm install
+      - run: npm run security
 
       - run: npm publish --provenance --access public

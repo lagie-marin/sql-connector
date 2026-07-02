@@ -4,7 +4,7 @@
   "description": "Le module sql-connector permet de gérer les connexions à une base de données MySQL, de définir des schémas de tables, et d'interagir avec les données de manière simple et efficace.",
   "main": "index.js",
   "scripts": {
-    "security": "npx eslint ."
+    "security": "npx eslint . --max-warnings 0"
   },
   "repository": {
     "type": "git",
