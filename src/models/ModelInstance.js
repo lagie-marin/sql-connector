@@ -43,7 +43,6 @@ class ModelInstance {
             Object.keys(row).forEach(key => {
                 Object.defineProperty(this, key, {
                     get: () => {
-                        // Utilisation du getter sécurisé
                         const val = getSafe(row, key);
                         if (typeof val === 'string' && val.trim().startsWith('{') && val.trim().endsWith('}')) {
                             try { return JSON.parse(val); } catch (e) { return val; }

@@ -157,7 +157,7 @@ class Model {
     constructor(name, schema) {
         this.name = name;
         this.schema = schema;
-        // Ajoute le modèle à la liste d'attente pour la création différée
+
         Model.pendingModels.push(this);
     }
 
@@ -165,7 +165,7 @@ class Model {
      * Synchronizes all tables with their JS schemas (creation + adding missing columns).
      * @returns {Promise<void>}
      */
-    static async syncAllTables({ dangerousSync = false } = {}) {
+    static async syncAllTables() {
         // Dépendances : {table: [tables dont elle dépend]}
         const dependencies = {};
         const modelMap = {};
@@ -184,7 +184,6 @@ class Model {
         const [dbTablesRows] = await conn.promise().query("SHOW TABLES");
         const dbTables = dbTablesRows.map(row => Object.values(row)[0]);
 
-        // Tri topologique
         const sorted = [];
         const visited = {};
         function visit(table) {
@@ -207,7 +206,7 @@ class Model {
 
             try {
                 await conn.promise().query(model.generateCreateTableStatement(model.schema.schemaDict));
-                await logs(`La table ${model.name} a été créée ou existe déjà`);
+                await logs(`The table ${model.name} has been created or already exists`);
             } catch (err) {
                 error(`Error creating table: ${err} with table name: ${model.name}`);
                 throw err;
