@@ -30,6 +30,7 @@ jobs:
   publish:
     needs: check_security
     runs-on: ubuntu-latest
+    environment: sqlc
     permissions:
       contents: read
       id-token: write
