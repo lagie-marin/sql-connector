@@ -126,7 +126,7 @@ class ModelInstance {
 
         const sql_request = `UPDATE ${this.name} SET ${setClause} WHERE ${whereClause}`;
 
-        const [result] = await getConnexion().promise().query(sql_request).catch((err) => {
+        const [result] = await getConnexion().promise().execute(sql_request).catch((err) => {
             error(`Error executing query updateOne: ${err}`);
             throw err;
         });
@@ -154,12 +154,12 @@ class ModelInstance {
     async delete(filter) {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
 
-        const rows = await getConnexion().promise().query(sql_request).catch((err) => {
+        const rows = await getConnexion().promise().execute(sql_request).catch((err) => {
             error(`Error executing query delete: ${err}`);
             throw err;
         });
 
-        return rows[1] != undefined ? 0 : 1;
+        return rows[0].affectedRows === 0 ? 0 : 1;
     }
 
     /**
@@ -170,12 +170,12 @@ class ModelInstance {
     async deleteOne() {
         const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(this.getRecordData()))}`;
 
-        const rows = await getConnexion().promise().query(sql_request).catch((err) => {
+        const rows = await getConnexion().promise().execute(sql_request).catch((err) => {
             error(`Error executing query deleteOne: ${err}`);
             throw err;
         });
 
-        return rows[1] != undefined ? 0 : 1;
+        return rows[0].affectedRows === 0 ? 0 : 1;
     }
 
     /**
@@ -185,14 +185,14 @@ class ModelInstance {
      * @throws {Error} Throws an error if query execution fails.
      */
     async customRequest(custom) {
-        const rows = await getConnexion().promise().query(custom).catch((err) => {
+        const rows = await getConnexion().promise().execute(custom).catch((err) => {
             error(`Error executing query: ${err}`);
             throw err;
         });
 
-        if (rows.length == 0) return 0;
+        if (rows[0].length == 0) return 0;
 
-        return new ModelInstance(this.name, rows, this.schema).data;
+        return new ModelInstance(this.name, rows[0], this.schema).data;
     }
 }
 

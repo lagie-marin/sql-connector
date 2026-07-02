@@ -1,4 +1,5 @@
 const { getSafe } = require("./security/safe");
+const { escapeIdentifier, escapeValue } = require("./sql");
 
 /**
  * Generates an SQL_request condition from a filter object.
@@ -32,6 +33,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         if (uniqueKeys.length > 0) {
             return uniqueKeys.map(key => {
                 let value = getSafe(filter, key);
+                const escapedKey = escapeIdentifier(key);
                 // normalize strings that may contain surrounding quotes or escaped quotes
                 if (typeof value === 'string') {
                     value = value.trim();
@@ -41,19 +43,19 @@ module.exports = function (filter, isUpdate = false, schema = null) {
                     value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
                 }
                 if (Array.isArray(value)) {
-                    return `${key} IN (${value.map(v => `'${String(v).replace(/'/g, "\\'")}'`).join(", ")})`;
+                    return `${escapedKey} IN (${value.map(v => escapeValue(v)).join(", ")})`;
                 }
                 if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
                     const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
-                    return `JSON_CONTAINS(${key}, '${String(jsonVal).replace(/'/g, "\\'")}')`;
+                    return `JSON_CONTAINS(${escapedKey}, ${escapeValue(jsonVal)})`;
                 }
-                if (value === null || value === "null") return `${key} IS NULL`;
+                if (value === null || value === "null") return `${escapedKey} IS NULL`;
                 // if string looks like an ISO datetime, convert to MySQL DATETIME format
                 if (typeof value === 'string' && /T/.test(value)) {
                     let val = value.replace(/\.\d+Z$/,'').replace(/Z$/,'').replace('T',' ');
-                    return `${key} = '${String(val).replace(/'/g, "\\'")}'`;
+                    return `${escapedKey} = ${escapeValue(val)}`;
                 }
-                return `${key} = ${typeof value === "string" ? `'${String(value).replace(/'/g, "\\'")}'` : value}`;
+                return `${escapedKey} = ${escapeValue(value)}`;
             }).join(" AND ");
         }
     }
@@ -61,6 +63,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
     // Comportement par défaut
     const conditions = filteredKeys.map((key, index) => {
         let value = getSafe(filteredValues, index);
+        const escapedKey = escapeIdentifier(key);
 
         if (typeof value === 'string') {
             value = value.trim();
@@ -71,17 +74,17 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         }
 
         if (Array.isArray(value)) {
-            return `${key} IN (${value.map(v => `'${String(v).replace(/'/g, "\\'")}'`).join(", ")})`;
+            return `${escapedKey} IN (${value.map(v => escapeValue(v)).join(", ")})`;
         }
         if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
             const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
             if (isUpdate) {
-                return `${key} = '${String(jsonVal).replace(/'/g, "\\'")}'`;
+                return `${escapedKey} = ${escapeValue(jsonVal)}`;
             }
-            return `JSON_CONTAINS(${key}, '${String(jsonVal).replace(/'/g, "\\'")}')`;
+            return `JSON_CONTAINS(${escapedKey}, ${escapeValue(jsonVal)})`;
         }
 
-        if ((value === null || value === "null") && isUpdate == false) return `${key} IS NULL`;
+        if ((value === null || value === "null") && isUpdate == false) return `${escapedKey} IS NULL`;
 
         // handle date-like strings when schema tells us the field is temporal
         const fieldDef = schema && schema.schemaDict ? getSafe(schema.schemaDict, key) : null;
@@ -102,9 +105,9 @@ module.exports = function (filter, isUpdate = false, schema = null) {
             if (isDateLike && /T/.test(val)) {
                 val = val.replace(/\.\d+Z$/,'').replace(/Z$/,'').replace('T',' ');
             }
-            return `${key} = '${String(val).replace(/'/g, "\\'")}'`;
+            return `${escapedKey} = ${escapeValue(val)}`;
         }
-        return `${key} = ${value}`;
+        return `${escapedKey} = ${escapeValue(value)}`;
     }).join(` ${isUpdate == false ? "AND" : ","} `);
     return conditions;
 }

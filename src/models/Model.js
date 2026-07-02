@@ -7,6 +7,7 @@ const { ModelInstance } = require("./ModelInstance");
 const { buildSelect, buildQueryParts } = require("../utils/buildQuery");
 const util = require("util");
 const { getSafe, setSafe } = require("../utils/security/safe");
+const { escapeIdentifier, escapeIdentifierList } = require("../utils/sql");
 
 function getFieldType(field) {
     if (typeof field === "object") {
@@ -52,15 +53,6 @@ function formatDefaultSql(defaultValue, fieldType) {
     if (typeof defaultValue === "object") return `DEFAULT "${JSON.stringify(defaultValue).replace(/"/g, '\\"')}"`;
 
     return `DEFAULT "${String(defaultValue).replace(/"/g, '\\"')}"`;
-}
-
-function generateValueSQL(value) {
-    return value.map(item => {
-        if (item === null) return 'NULL';
-        if (typeof item === "string") return `"${item.replace(/"/g, '\\"')}"`;
-        if (typeof item === "object" && item !== null) return `"${item}"`;
-        return item;
-    }).join(", ");
 }
 
 const reservedKeywords = ['ADD', 'ALL', 'ALTER', 'AND', 'AS', 'ASC', 'BETWEEN', 'BY', 'CASE', 'CHECK', 'COLUMN', 'CONSTRAINT', 'CREATE', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'DEFAULT', 'DELETE', 'DESC', 'DISTINCT', 'DROP', 'ELSE', 'END', 'ESCAPE', 'EXCEPT', 'EXISTS', 'FOR', 'FOREIGN', 'FROM', 'FULL', 'GROUP', 'HAVING', 'IN', 'INNER', 'INSERT', 'INTERSECT', 'INTO', 'IS', 'JOIN', 'LEFT', 'LIKE', 'LIMIT', 'NOT', 'NULL', 'ON', 'OR', 'ORDER', 'OUTER', 'PRIMARY', 'REFERENCES', 'RIGHT', 'SELECT', 'SET', 'SOME', 'TABLE', 'THEN', 'UNION', 'UNIQUE', 'UPDATE', 'VALUES', 'WHEN', 'WHERE'];
@@ -109,7 +101,7 @@ function getColumnDefinition(fieldName, field) {
     if (field.auto_increment) colDef += ' AUTO_INCREMENT';
     if (field.primary_key) colDef += ' PRIMARY KEY';
     if (typeof field.customize === 'string' && field.customize.length != 0) colDef += ` ${field.customize}`;
-    return `${fieldName} ${colDef}`;
+    return `${escapeIdentifier(fieldName)} ${colDef}`;
 }
 
 /**
@@ -174,7 +166,7 @@ class Model {
             const model = getSafe(modelMap, table);
 
             try {
-                await conn.promise().query(model.generateCreateTableStatement(model.schema.schemaDict));
+                await conn.promise().execute(model.generateCreateTableStatement(model.schema.schemaDict));
                 await logs(`The table ${model.name} has been created or already exists`);
             } catch (err) {
                 error(`Error creating table: ${err} with table name: ${model.name}`);
@@ -218,7 +210,7 @@ class Model {
             error("Error: Invalid table name. Please choose a different name that is not a reserved keyword in SQL_request");
             return;
         }
-        return `CREATE TABLE IF NOT EXISTS ${this.name} (${columns.join(', ')}${foreignKey.length > 0 ? ", " + foreignKey.join(', ') : ""}) ENGINE=InnoDB`;
+        return `CREATE TABLE IF NOT EXISTS ${escapeIdentifier(this.name)} (${columns.join(', ')}${foreignKey.length > 0 ? ", " + foreignKey.join(', ') : ""}) ENGINE=InnoDB`;
     }
 
     getRecordData() {
@@ -241,10 +233,10 @@ class Model {
      */
     async save(data) {
         const keys = Object.keys(data);
-        const sql_request = `INSERT INTO ${this.name} (${keys.join(', ')}) VALUES (${generateValueSQL(Object.values(data))})`;
+        const sql_request = `INSERT INTO ${escapeIdentifier(this.name)} (${escapeIdentifierList(keys)}) VALUES (${keys.map(() => "?").join(", ")})`;
 
         try {
-            const result = await getConnexion().promise().query(sql_request);
+            const result = await getConnexion().promise().execute(sql_request, Object.values(data));
             return result[0];
         } catch (err) {
             error(`Error inserting data into ${this.name}: ${err}`);
@@ -281,9 +273,9 @@ class Model {
                 if (typeof item === 'string') {
                     if (!item.includes('.')) {
                         if (item.startsWith('name')) {
-                            return `${join.table}.${item}`;
+                            return `${escapeIdentifier(join.table)}.${escapeIdentifier(item)}`;
                         }
-                        return `${this.name}.${item}`;
+                        return `${escapeIdentifier(this.name)}.${escapeIdentifier(item)}`;
                     }
                 }
                 else if (typeof item === 'object') {
@@ -292,13 +284,13 @@ class Model {
                     if (Array.isArray(getSafe(item, key))) {
                         setSafe(item, key, getSafe(item, key).map((param, index) => {
                             if (index === 0 && typeof param === 'string' && !param.includes('.')) {
-                                return `${this.name}.${param}`;
+                                return `${escapeIdentifier(this.name)}.${escapeIdentifier(param)}`;
                             }
                             return param;
                         }));
                     }
                     else if (typeof getSafe(item, key) === 'string' && !getSafe(item, key).includes('.')) {
-                        setSafe(item, key, `${this.name}.${getSafe(item, key)}`);
+                        setSafe(item, key, `${escapeIdentifier(this.name)}.${escapeIdentifier(getSafe(item, key))}`);
                     }
                 }
                 return item;
@@ -306,13 +298,13 @@ class Model {
         }
         let joinClause = "";
         if (join && join.table && join.on) {
-            joinClause = ` INNER JOIN ${join.table} ON ${join.on}`;
+            joinClause = ` INNER JOIN ${escapeIdentifier(join.table)} ON ${join.on}`;
         }
 
-        const query = `SELECT ${buildSelect(select)} FROM ${this.name}${joinClause} ${buildQueryParts(options)}`;
+        const query = `SELECT ${buildSelect(select)} FROM ${escapeIdentifier(this.name)}${joinClause} ${buildQueryParts(options)}`;
 
         try {
-            const result = await getConnexion().promise().query(query);
+            const result = await getConnexion().promise().execute(query);
             const rows = result && Array.isArray(result) ? result[0] : result;
 
             if (!rows || rows.length === 0) return [];
@@ -330,7 +322,7 @@ class Model {
      * @returns {Promise<ModelInstance|number>} - A promise that resolves to a `ModelInstance` if a record is found, or `0` if no records match the filter.
      */
     async count(filter) {
-        return this.customRequest(`SELECT COUNT(*) as count FROM ${this.name} ${filter != undefined ? `WHERE ${generateCondition(formatObject(filter))}` : ""}`, "count");
+        return this.customRequest(`SELECT COUNT(*) as count FROM ${escapeIdentifier(this.name)} ${filter != undefined ? `WHERE ${generateCondition(formatObject(filter))}` : ""}`, "count");
     }
 
     /**
@@ -341,11 +333,11 @@ class Model {
      */
     async customRequest(custom, custom_err_name = "") {
         try {
-            const rows = await getConnexion().promise().query(custom);
+            const rows = await getConnexion().promise().execute(custom);
 
-            if (rows.length == 0) return 0;
+            if (rows[0].length == 0) return 0;
 
-            return new ModelInstance(this.name, rows, this.schema);
+            return new ModelInstance(this.name, rows[0], this.schema);
         } catch (err) {
             error(`Error executing query ${custom_err_name}: ${err}`);
             throw err;
@@ -361,10 +353,10 @@ class Model {
      * @throws {Error} Throws an error if the SQL query fails.
      */
     async delete(filter) {
-        const sql_request = `DELETE FROM ${this.name} WHERE ${generateCondition(formatObject(filter))}`;
+        const sql_request = `DELETE FROM ${escapeIdentifier(this.name)} WHERE ${generateCondition(formatObject(filter))}`;
         return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then((rows) => {
-                if (rows[1] != undefined) return resolve(0);
+            getConnexion().promise().execute(sql_request).then((rows) => {
+                if (rows[0].affectedRows === 0) return resolve(0);
 
                 return resolve(1);
             }).catch((err) => {
@@ -385,10 +377,10 @@ class Model {
      * @returns {Promise<void>} A promise that resolves when the query execution is complete.
      */
     async dropTable() {
-        const sql_request = `DROP TABLE IF EXISTS ${this.name};`;
+        const sql_request = `DROP TABLE IF EXISTS ${escapeIdentifier(this.name)};`;
 
         return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then((rows) => {
+            getConnexion().promise().execute(sql_request).then((rows) => {
                 console.log(rows);
             }).catch((err) => {
                 error(`Error executing query drop: ${err}`);
@@ -417,11 +409,11 @@ class Model {
      * @throws {Error} If there is an error executing the SQL_request query.
      */
     async generate_uuid(var_uuid = "uuid") {
-        const uuid = (await getConnexion().promise().query("SELECT UUID();"))[0][0]["UUID()"];
-        const sql_request = `SELECT COUNT(*) FROM ${this.name} WHERE ${var_uuid}="${uuid}";`;
+        const uuid = (await getConnexion().promise().execute("SELECT UUID();"))[0][0]["UUID()"];
+        const sql_request = `SELECT COUNT(*) FROM ${escapeIdentifier(this.name)} WHERE ${escapeIdentifier(var_uuid)} = ?;`;
 
         return new Promise((resolve, reject) => {
-            getConnexion().promise().query(sql_request).then((rows) => {
+            getConnexion().promise().execute(sql_request, [uuid]).then((rows) => {
                 if (rows[0][0]['COUNT(*)'] == 0) return resolve(uuid);
                 resolve(null);
             }).catch((err) => {

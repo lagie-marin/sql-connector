@@ -1,26 +1,28 @@
 const formatObject = require("./formatObject");
 const generateCondition = require("./generateCondition");
+const { escapeIdentifier, escapeOrderDirection, escapeValue } = require("./sql");
 
 function buildField(field) {
     if (typeof field === 'string') {
-        return field;
+        if (field === "*") return "*";
+        return escapeIdentifier(field);
     }
 
     let sql = '';
 
     if (field.sum)
-        sql = `SUM(${field.sum})`;
+        sql = `SUM(${escapeIdentifier(field.sum)})`;
     else if (field.dateFormat) {
         const [col, format] = field.dateFormat;
-        sql = `DATE_FORMAT(${col}, '${format}')`;
+        sql = `DATE_FORMAT(${escapeIdentifier(col)}, ${escapeValue(format)})`;
     }
     else if (field.col)
-        sql = field.col;
+        sql = escapeIdentifier(field.col);
 
     if (field.as)
-        sql += ` AS ${field.as}`;
+        sql += ` AS ${escapeIdentifier(field.as)}`;
     else if (field.sum)
-        sql += ` AS ${field.sum}`;
+        sql += ` AS ${escapeIdentifier(field.sum)}`;
     return sql;
 }
 
@@ -39,30 +41,33 @@ function buildQueryParts(options) {
 
     if (options.where) {
         if (typeof options.where === 'string') {
-            parts.push(`WHERE ${options.where}`);
+            throw new Error("Raw string WHERE clauses are not allowed. Pass an object filter instead.");
         } else {
             parts.push(`WHERE ${generateCondition(formatObject(options.where))}`);
         }
     }
 
     if (options.groupBy) {
-        parts.push(`GROUP BY ${options.groupBy.join(', ')}`);
+        parts.push(`GROUP BY ${options.groupBy.map(group => escapeIdentifier(group)).join(', ')}`);
     }
 
     if (options.having) {
-        parts.push(`HAVING ${options.having}`);
+        throw new Error("Raw string HAVING clauses are not allowed. Use a structured filter instead.");
     }
 
     if (options.orderBy) {
         const order = options.orderBy.map(o =>
             typeof o === 'string'
-                ? o
-                : `${o.field} ${o.direction || 'ASC'}`
+                ? escapeIdentifier(o)
+                : `${escapeIdentifier(o.field)} ${escapeOrderDirection(o.direction || 'ASC')}`
         );
         parts.push(`ORDER BY ${order.join(', ')}`);
     }
 
     if (options.limit) {
+        if (!Number.isInteger(options.limit) || options.limit < 0) {
+            throw new Error("Invalid LIMIT value");
+        }
         parts.push(`LIMIT ${options.limit}`);
     }
 
