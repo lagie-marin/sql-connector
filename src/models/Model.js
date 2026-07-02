@@ -224,7 +224,7 @@ class Model {
     generateCreateTableStatement(schema) {
         let foreignKey = [];
         const columns = Object.keys(schema).map(fieldName => {
-            setSafe(field, schema, fieldName);
+            const field = getSafe(schema, fieldName);
             let lengthDefault = 255;
 
             if (!field.type && typeof field == "object" && !(Array.isArray(field.enum) && field.enum.length > 0)) throw new Error(`Field ${fieldName} has no type defined.`);
