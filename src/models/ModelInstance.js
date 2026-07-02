@@ -61,7 +61,7 @@ class ModelInstance {
     }
 
     /**
-     * Extrait la ligne de données réelle en gérant la structure du driver de BDD [rows, fields]
+     * Extract the actual data row by managing the database driver's structure [rows, fields]
      * @private
      */
     _getTargetRow() {

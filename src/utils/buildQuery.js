@@ -2,7 +2,6 @@ const formatObject = require("./formatObject");
 const generateCondition = require("./generateCondition");
 
 function buildField(field) {
-    // 👉 cas simple : string (nom de colonne)
     if (typeof field === 'string') {
         return field;
     }

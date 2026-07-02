@@ -97,8 +97,8 @@ const reservedKeywords = ['ADD', 'ALL', 'ALTER', 'AND', 'AS', 'ASC', 'BETWEEN', 
 /**
  * Checks if a table name is a reserved keyword.
  * 
- * @param {string} tableName Le nom de la table à vérifier.
- * @returns {boolean} `true` si le nom de la table est un mot-clé réservé, sinon `false`.
+ * @param {string} tableName The name of the table to be checked.
+ * @returns {boolean} `true` if the table name is a reserved keyword, otherwise `false`.
  * 
  * @example
  * const isReserved = ifReservedKeywords('SELECT');
@@ -286,18 +286,18 @@ class Model {
 
     /**
      * @typedef {Object} SelectAggregation
-     * @property {string} [sum] - Le nom de la colonne à additionner (ex: "total_runs").
-     * @property {string} [count] - Le nom de la colonne à compter.
-     * @property {string[]} [dateFormat] - Tableau avec [colonne, format] (ex: ["date_day", "%Y-%m-%d"]).
-     * @property {string} as - L'alias de sortie pour le champ SQL (ex: "total_runs" ou "period").
+     * @property {string} [sum] - The name of the column to sum (e.g., "total_runs").
+     * @property {string} [count] - The name of the column to count.
+     * @property {string[]} [dateFormat] - Array with [column, format] (e.g., ["date_day", "%Y-%m-%d"]).
+     * @property {string} as - The output alias for the SQL field (e.g., "total_runs" or "period").
      */
 
     /**
      * Retrieves multiple entries from the table.
      * @param {Object} [options] - Query options (attributes, where, order, limit).
-     * @param {Array<string|SelectAggregation>} [options.select] - Champs à retourner.Champs à retourner.
+     * @param {Array<string|SelectAggregation>} [options.select] - Fields to return.
      * @param {Object} [options.where] - Filters (key/value).
-     * @param {Array} [options.order] - Ex: [['points', 'DESC']]
+     * @param {Array} [options.order] - Example: [['points', 'DESC']]
      * @param {number} [options.limit] - Result limit.
      * @param {Object} [options.join] - Join options.
      * @param {String} [options.join.table] - Table to join.

@@ -1,38 +1,34 @@
-// src/utils/security/safe.js
-
 /**
- * Liste noire des clés interdites pour éviter la pollution de prototype.
+ * Blacklist of prohibited keys to prevent prototype pollution.
  */
 const BLACKLIST = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
- * Récupère une valeur de manière sécurisée dans un objet.
- * @param {Object} obj - L'objet cible
- * @param {string} key - La clé ou propriété à lire
- * @returns {*} La valeur ou undefined si non trouvé / interdite
+ * Extracts a value in a secure manner from an object.
+ * @param {Object} obj - The target object
+ * @param {string} key - The key or property to read
+ * @returns {*} The value or undefined if not found / prohibited
  */
 function getSafe(obj, key) {
     if (!obj || BLACKLIST.has(key)) {
         return undefined;
     }
     
-    // Reflect.get remplace obj[key] de manière native et sécurisée pour ESLint
     return Reflect.get(obj, key);
 }
 
 /**
- * Définit une valeur de manière sécurisée dans un objet.
- * @param {Object} obj - L'objet cible
- * @param {string} key - La clé à écrire
- * @param {*} value - La valeur à affecter
- * @returns {boolean} True si l'opération a réussi, false sinon
+ * Sets a value in a secure manner within an object.
+ * @param {Object} obj - The target object
+ * @param {string} key - The key or property to write
+ * @param {*} value - The value to assign
+ * @returns {boolean} True if the operation was successful, false otherwise
  */
 function setSafe(obj, key, value) {
     if (!obj || BLACKLIST.has(key)) {
         return false;
     }
     
-    // Reflect.set remplace obj[key] = value de manière native et sécurisée pour ESLint
     return Reflect.set(obj, key, value);
 }
 
