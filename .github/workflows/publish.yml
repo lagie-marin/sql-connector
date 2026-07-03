@@ -45,7 +45,9 @@ jobs:
       run: |
         npm run test
   publish:
-    needs: check_security
+    needs: 
+      - check_security
+      - integrity
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment: sqlc
