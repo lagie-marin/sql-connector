@@ -45,7 +45,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
                 if (Array.isArray(value)) {
                     return `${escapedKey} IN (${value.map(v => escapeValue(v)).join(", ")})`;
                 }
-                if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
+                if (typeof value === "object" && value !== null || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
                     const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
                     return `JSON_CONTAINS(${escapedKey}, ${escapeValue(jsonVal)})`;
                 }
@@ -76,7 +76,7 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         if (Array.isArray(value)) {
             return `${escapedKey} IN (${value.map(v => escapeValue(v)).join(", ")})`;
         }
-        if (typeof value === "object" || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
+        if (typeof value === "object" && value !== null || (typeof value === "string" && value.trim().startsWith("{") && value.trim().endsWith("}"))) {
             const jsonVal = typeof value === "string" ? value : JSON.stringify(value);
             if (isUpdate) {
                 return `${escapedKey} = ${escapeValue(jsonVal)}`;

@@ -2,6 +2,25 @@ const formatObject = require("./formatObject");
 const generateCondition = require("./generateCondition");
 const { escapeIdentifier, escapeOrderDirection, escapeValue } = require("./sql");
 
+function buildGroupByItem(group) {
+    if (typeof group !== 'string') {
+        return escapeIdentifier(group);
+    }
+
+    const trimmedGroup = group.trim();
+
+    if (/^DATE_FORMAT\(/i.test(trimmedGroup)) {
+        const match = trimmedGroup.match(/^DATE_FORMAT\(([^,]+),\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\)$/i);
+        if (match) {
+            const column = match[1].trim();
+            const format = match[2].slice(1, -1).replace(/\\'/g, "'").replace(/\\"/g, '"');
+            return `DATE_FORMAT(${escapeIdentifier(column)}, ${escapeValue(format)})`;
+        }
+    }
+
+    return escapeIdentifier(trimmedGroup);
+}
+
 function buildField(field) {
     if (typeof field === 'string') {
         if (field === "*") return "*";
@@ -41,14 +60,15 @@ function buildQueryParts(options) {
 
     if (options.where) {
         if (typeof options.where === 'string') {
-            throw new Error("Raw string WHERE clauses are not allowed. Pass an object filter instead.");
+            if (options.where.trim().toUpperCase().startsWith("WHERE ")) throw new Error("Raw string WHERE clauses are not allowed. Use a structured filter instead.");
+            else parts.push(`WHERE ${options.where}`);
         } else {
             parts.push(`WHERE ${generateCondition(formatObject(options.where))}`);
         }
     }
 
     if (options.groupBy) {
-        parts.push(`GROUP BY ${options.groupBy.map(group => escapeIdentifier(group)).join(', ')}`);
+        parts.push(`GROUP BY ${options.groupBy.map(group => buildGroupByItem(group)).join(', ')}`);
     }
 
     if (options.having) {

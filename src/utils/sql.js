@@ -2,6 +2,10 @@ const { escape, escapeId } = require("mysql2");
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9_]+$/;
 
+function normalizeIdentifierPart(part) {
+    return String(part).trim().replace(/^`+|`+$/g, "");
+}
+
 function escapeIdentifier(identifier) {
     if (identifier === "*") return "*";
 
@@ -10,11 +14,13 @@ function escapeIdentifier(identifier) {
     }
 
     return identifier.split(".").map(part => {
-        if (part === "*") return "*";
-        if (!SAFE_IDENTIFIER.test(part)) {
+        const normalizedPart = normalizeIdentifierPart(part);
+        
+        if (normalizedPart === "*") return "*";
+        if (!SAFE_IDENTIFIER.test(normalizedPart)) {
             throw new Error(`Invalid SQL identifier: ${identifier}`);
         }
-        return escapeId(part);
+        return escapeId(normalizedPart);
     }).join(".");
 }
 

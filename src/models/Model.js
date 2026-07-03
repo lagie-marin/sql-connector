@@ -278,21 +278,6 @@ class Model {
                         return `${escapeIdentifier(this.name)}.${escapeIdentifier(item)}`;
                     }
                 }
-                else if (typeof item === 'object') {
-                    const key = Object.keys(item)[0];
-
-                    if (Array.isArray(getSafe(item, key))) {
-                        setSafe(item, key, getSafe(item, key).map((param, index) => {
-                            if (index === 0 && typeof param === 'string' && !param.includes('.')) {
-                                return `${escapeIdentifier(this.name)}.${escapeIdentifier(param)}`;
-                            }
-                            return param;
-                        }));
-                    }
-                    else if (typeof getSafe(item, key) === 'string' && !getSafe(item, key).includes('.')) {
-                        setSafe(item, key, `${escapeIdentifier(this.name)}.${escapeIdentifier(getSafe(item, key))}`);
-                    }
-                }
                 return item;
             });
         }
@@ -379,14 +364,12 @@ class Model {
     async dropTable() {
         const sql_request = `DROP TABLE IF EXISTS ${escapeIdentifier(this.name)};`;
 
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().execute(sql_request).then((rows) => {
-                console.log(rows);
-            }).catch((err) => {
-                error(`Error executing query drop: ${err}`);
-                return;
-            });
-        })
+        try {
+            await getConnexion().promise().execute(sql_request);
+        } catch (err) {
+            error(`Error executing query drop: ${err}`);
+            throw err;
+        }
     }
 
     /**
@@ -409,18 +392,17 @@ class Model {
      * @throws {Error} If there is an error executing the SQL_request query.
      */
     async generate_uuid(var_uuid = "uuid") {
-        const uuid = (await getConnexion().promise().execute("SELECT UUID();"))[0][0]["UUID()"];
-        const sql_request = `SELECT COUNT(*) FROM ${escapeIdentifier(this.name)} WHERE ${escapeIdentifier(var_uuid)} = ?;`;
+        try {
+            const uuid = (await getConnexion().promise().execute("SELECT UUID();"))[0][0]["UUID()"];
+            const sql_request = `SELECT COUNT(*) FROM ${escapeIdentifier(this.name)} WHERE ${escapeIdentifier(var_uuid)} = ?;`;
+            const [rows] = await getConnexion().promise().execute(sql_request, [uuid]);
 
-        return new Promise((resolve, reject) => {
-            getConnexion().promise().execute(sql_request, [uuid]).then((rows) => {
-                if (rows[0][0]['COUNT(*)'] == 0) return resolve(uuid);
-                resolve(null);
-            }).catch((err) => {
-                error(`Error executing query gen_uuid: ${err}`);
-                return null;
-            })
-        })
+            if (rows[0]['COUNT(*)'] == 0) return uuid;
+            return null;
+        } catch (err) {
+            error(`Error executing query gen_uuid: ${err}`);
+            return null; // Retourne null en cas de plantage SQL
+        }
     }
 }
 
