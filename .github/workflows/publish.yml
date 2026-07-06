@@ -49,7 +49,7 @@ jobs:
     needs: 
       - check_security
       - integrity
-    if: github.event_name == 'release' || github.ref_name == 'main'
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment: sqlc
     permissions:
