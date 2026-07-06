@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 jobs:
   check_security:
     runs-on: ubuntu-latest
