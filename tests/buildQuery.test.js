@@ -77,3 +77,26 @@ describe('Utils - buildQuery.js', () => {
         });
     });
 });
+
+describe('buildQuery - Advanced Fields & Aggregations', () => {
+
+    test('Should safely compile COUNT(*) aggregated calculations with an expression alias', () => {
+        const fields = [{ count: '*', as: 'total_user' }];
+        expect(buildSelect(fields)).toBe('COUNT(*) AS `total_user`');
+    });
+
+    test('Should safely compile COUNT(column) on structured column identifiers', () => {
+        const fields = [{ count: 'id', as: 'unique_ids' }];
+        expect(buildSelect(fields)).toBe('COUNT(`id`) AS `unique_ids`');
+    });
+
+    test('Should correctly process multi-column GROUP BY arrays to avoid ONLY_FULL_GROUP_BY validation issues', () => {
+        const options = { 
+            select: ['status', 'email', { count: '*', as: 'total_user' }], 
+            groupBy: ['status', 'email'] 
+        };
+        const parts = buildQueryParts(options);
+
+        expect(parts).toContain('GROUP BY `status`, `email`');
+    });
+});

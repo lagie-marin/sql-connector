@@ -37,6 +37,10 @@ function buildField(field) {
     }
     else if (field.col)
         sql = escapeIdentifier(field.col);
+    else if (field.distinct)
+        sql = `DISTINCT ${escapeIdentifier(field.distinct)}`;
+    else if (field.count)
+        sql = `COUNT(${escapeIdentifier(field.count)})`;
 
     if (field.as)
         sql += ` AS ${escapeIdentifier(field.as)}`;
