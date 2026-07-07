@@ -5,7 +5,6 @@ const generateCondition = require("../utils/generateCondition");
 const formatObject = require("../utils/formatObject");
 const { ModelInstance } = require("./ModelInstance");
 const { buildSelect, buildQueryParts } = require("../utils/buildQuery");
-const util = require("util");
 const { getSafe, setSafe } = require("../utils/security/safe");
 const { escapeIdentifier, escapeIdentifierList } = require("../utils/sql");
 

@@ -62,45 +62,40 @@ function buildSelect(select = []) {
 function buildQueryParts(options) {
     const parts = [];
 
-    try {
-        if (options.where) {
-            if (typeof options.where === 'string') {
-                if (options.where.trim().toUpperCase().startsWith("WHERE ")) throw new Error("Raw string WHERE clauses are not allowed. Use a structured filter instead.");
-                else parts.push(`WHERE ${options.where}`);
-            } else {
-                parts.push(`WHERE ${generateCondition(formatObject(options.where))}`);
-            }
+    if (options.where) {
+        if (typeof options.where === 'string') {
+            if (options.where.trim().toUpperCase().startsWith("WHERE ")) throw new Error("Raw string WHERE clauses are not allowed. Use a structured filter instead.");
+            else parts.push(`WHERE ${options.where}`);
+        } else {
+            parts.push(`WHERE ${generateCondition(formatObject(options.where))}`);
         }
-    
-        if (options.groupBy) {
-            parts.push(`GROUP BY ${options.groupBy.map(group => buildGroupByItem(group)).join(', ')}`);
-        }
-    
-        if (options.having) {
-            throw new Error("Raw string HAVING clauses are not allowed. Use a structured filter instead.");
-        }
-    
-        if (options.orderBy) {
-            const order = options.orderBy.map(o =>
-                typeof o === 'string'
-                    ? escapeIdentifier(o)
-                    : `${escapeIdentifier(o.field)} ${escapeOrderDirection(o.direction || 'ASC')}`
-            );
-            parts.push(`ORDER BY ${order.join(', ')}`);
-        }
-    
-        if (options.limit) {
-            if (!Number.isInteger(options.limit) || options.limit < 0) {
-                throw new Error("Invalid LIMIT value");
-            }
-            parts.push(`LIMIT ${options.limit}`);
-        }
-    
-        return parts.join('\n\n');
-    } catch (err) {
-        throw new Error(err);
     }
 
+    if (options.groupBy) {
+        parts.push(`GROUP BY ${options.groupBy.map(group => buildGroupByItem(group)).join(', ')}`);
+    }
+
+    if (options.having) {
+        throw new Error("Raw string HAVING clauses are not allowed. Use a structured filter instead.");
+    }
+
+    if (options.orderBy) {
+        const order = options.orderBy.map(o =>
+            typeof o === 'string'
+                ? escapeIdentifier(o)
+                : `${escapeIdentifier(o.field)} ${escapeOrderDirection(o.direction || 'ASC')}`
+        );
+        parts.push(`ORDER BY ${order.join(', ')}`);
+    }
+
+    if (options.limit) {
+        if (!Number.isInteger(options.limit) || options.limit < 0) {
+            throw new Error("Invalid LIMIT value");
+        }
+        parts.push(`LIMIT ${options.limit}`);
+    }
+
+    return parts.join('\n\n');
 }
 
 module.exports = { buildQueryParts, buildSelect }

@@ -107,7 +107,7 @@ describe('Utils - buildQuery.js', () => {
             };
 
             expect(() => buildQueryParts(options)).toThrow(
-                "Error: Group by items must be strings"
+                "Group by items must be strings"
             );
         })
     })
