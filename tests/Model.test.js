@@ -1,5 +1,7 @@
 // 1. LES MOCKS EN PREMIER
 const { mockExecute, mockPool } = require('./mysqlMock');
+const connexionManager = require("../src/db/connexion");
+
 jest.mock('@mlagie/logger', () => ({
     logs: jest.fn(),
     error: jest.fn()
@@ -549,5 +551,171 @@ describe('Tests unitaires avec Mock - Model.js (generate_uuid)', () => {
         const result = await testModel.generate_uuid();
 
         expect(result).toBe("uuid-123");
+    });
+
+    test("find() - Options Advanced - Doit gérer les jointures de table et ignorer les éléments du select qui ne sont pas des chaînes", async () => {
+        // 1. Initialisation de votre modèle
+        const pipelineModel = new Model("ProjectPipeline", { schemaDict: {} });
+
+        // Simule une réponse MySQL nominale pour que la méthode find() aille jusqu'au bout
+        mockExecute.mockResolvedValue([[{ id: 1 }]]);
+
+        // 2. On configure des options avec un 'join' et un tableau 'select' mixte
+        await pipelineModel.find({
+            select: [
+                "id",             // Chaîne standard (sera préfixée par la table principale)
+                "name_pipeline",  // Chaîne commençant par 'name' (sera préfixée par la table de jointure)
+                12345,            // 🔥 UN NOMBRE (Pas une string) : déclenchera le 'return item' direct
+                { raw: "NOW()" }  // 🔥 UN OBJET (Pas une string) : déclenchera également le 'return item'
+            ],
+            join: {
+                table: "Users",
+                on: { "ProjectPipeline.user_id": "Users.id" }
+            }
+        });
+
+        // 3. Validation de la requête SQL générée en arrière-plan
+        const lastQuery = mockExecute.mock.calls[0][0];
+
+        // Vérifie que les chaînes ont bien été traitées avec leur table respective
+        expect(lastQuery).toContain("`ProjectPipeline`.`id`");
+        expect(lastQuery).toContain("`Users`.`name_pipeline`");
+
+        // Le test passe avec succès et la ligne de couverture "return item" est validée !
+    });
+
+    test("generate_uuid() - Doit renvoyer null si l'UUID généré existe déjà en base de données (Collision)", async () => {
+        // 1. Initialisation de votre modèle
+        const pipelineModel = new Model("ProjectPipeline", { schemaDict: {} });
+
+        // 2. Configuration des réponses successives de la base de données (mocking séquentiel)
+        mockExecute
+            // Premier appel MySQL : La fonction native SELECT UUID(); génère un UUID virtuel
+            .mockResolvedValueOnce([[{ "UUID()": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d" }]])
+            // Deuxième appel MySQL : La requête de vérification COUNT(*) indique que cet UUID existe déjà (COUNT = 1)
+            .mockResolvedValueOnce([[{ "COUNT(*)": 1 }]]);
+
+        // 3. Exécution de la méthode : comme COUNT(*) vaut 1, la condition == 0 est FAUSSE
+        const uuidResult = await pipelineModel.generate_uuid("uuid_field");
+
+        // 4. Vérification que la méthode a bien retourné null suite à la collision
+        expect(uuidResult).toBeNull();
+
+        // Optionnel : On s'assure que la requête générée ciblait bien le bon champ de condition
+        const lastSqlQuery = mockExecute.mock.calls[1][0];
+        expect(lastSqlQuery).toContain("WHERE `uuid_field` = ?");
+    });
+});
+
+describe("Model Unit Tests - Deep Coverage", () => {
+
+    beforeAll(() => {
+        connexionManager.setConnexion(mockPool);
+    });
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    test("getColumnDefinition & formatDefaultSql - Traitement des cas limites et d'erreurs", () => {
+        const myModel = new Model("Users", {});
+
+        // Lignes 92-94 : Conflit Primary Key ET Unique
+        expect(() => {
+            myModel.generateCreateTableStatement({
+                id: { type: "INT", primary_key: true, unique: true }
+            });
+        }).toThrow("Field 'id' cannot be both PRIMARY KEY and UNIQUE.");
+
+        // Formatage de valeurs par défaut exotiques (Fonction date, Date object, Objets complexes)
+        // Note: Pour tester indirectement getColumnDefinition, on l'appelle via generateCreateTableStatement
+        const complexSchema = {
+            created_at: { type: Date, default: () => new Date() }, // Ligne 34
+            updated_at: { type: "Timestamp", default: "NOW()" },        // Ligne 37
+            metadata: { type: Boolean, default: false }       // Ligne 49
+        };
+        const sql = myModel.generateCreateTableStatement(complexSchema);
+        expect(sql).toContain("DEFAULT CURRENT_TIMESTAMP");
+        expect(sql).toContain('CREATE TABLE IF NOT EXISTS `Users` (`created_at` DATETIME DEFAULT CURRENT_TIMESTAMP, `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, `metadata` BOOLEAN DEFAULT 0) ENGINE=InnoDB');
+
+        expect(() => {
+            myModel.generateCreateTableStatement({
+                ghost: { type: "UNKNOWN_TYPE" }
+            });
+        }).toThrow("Field ghost has unsupported type UNKNOWN_TYPE."); // Si non bloqué par l'étape 100, l'étape 210 lèvera l'exception d'un type invalide
+    });
+
+    test("syncAllTables() - Gestion nominale de création et détection des cycles de clés étrangères", async () => {
+        Model.pendingModels = []; // On nettoie les modèles empilés
+
+        // Création de deux modèles interdépendants pour forcer la détection cyclique (Ligne 163)
+        const modelA = new Model("TableA", { schemaDict: { b_id: { foreignKey: "TableB(id)" } } });
+        const modelB = new Model("TableB", { schemaDict: { a_id: { foreignKey: "TableA(id)" } } });
+
+        // Ligne 163 : Doit lever une erreur à cause de la boucle TableA -> TableB -> TableA
+        await expect(Model.syncAllTables()).rejects.toThrow("Cyclic foreign key dependency detected");
+
+        // Cas nominal : Nettoyage et ré-empilement de modèles sans cycle
+        Model.pendingModels = [];
+        const modelSingle = new Model("TableNominale", { schemaDict: { id: { type: "Number" } } });
+
+        mockExecute.mockResolvedValue([{ affectedRows: 1 }]);
+        await Model.syncAllTables();
+
+        expect(mockExecute).toHaveBeenCalled();
+    });
+
+    test("generateCreateTableStatement() - Doit rejeter les structures vides et les mots réservés", () => {
+        // Champ sans aucun type défini
+        const modelInvalid = new Model("TestTable", {});
+        expect(() => {
+            modelInvalid.generateCreateTableStatement({ undefined_field: {} });
+        }).toThrow("Field undefined_field has no type defined.");
+
+        // Type invalide ou non supporté passé sous forme de string directe
+        expect(() => {
+            modelInvalid.generateCreateTableStatement({ invalid_field: "BAD_TYPE_STRING" });
+        }).toThrow("Field invalid_field has unsupported type");
+
+        // Utilisation d'un mot-clé réservé SQL comme nom de table (ex: SELECT, ALTER)
+        const modelReserved = new Model("SELECT", {});
+        const result = modelReserved.generateCreateTableStatement({ id: { type: "Number" } });
+        expect(result).toBeUndefined(); // Renvoie undefined car le log d'erreur bloque la requête
+    });
+
+    test("find() - Ligne 259 - Doit intercepter et propager les erreurs SQL", async () => {
+        const myModel = new Model("Users", { schemaDict: {} });
+        mockExecute.mockRejectedValue(new Error("Syntax Error near WHERE"));
+
+        await expect(myModel.find({ select: ["id"] })).rejects.toThrow("Syntax Error near WHERE");
+    });
+
+    test("count() - Ligne 278 - Doit générer la requête COUNT globale sans clause WHERE si aucun filtre n'est fourni", async () => {
+        const myModel = new Model("Users", { schemaDict: {} });
+
+        // Simule un retour valide pour l'instanciation de l'instance
+        mockExecute.mockResolvedValue([[{ count: 42 }]]);
+
+        // On appelle count() sans paramètre (filter = undefined)
+        await myModel.count();
+
+        const sqlRequest = mockExecute.mock.calls[0][0];
+        // La requête ne doit pas avoir de mot clé WHERE attaché
+        expect(sqlRequest).not.toContain("WHERE");
+        expect(sqlRequest).toContain("SELECT COUNT(*) as count FROM `Users`");
+    });
+
+    test("customRequest() - Ligne 295 - Doit lever une exception typée en cas de crash SQL", async () => {
+        const myModel = new Model("Users", { schemaDict: {} });
+        mockExecute.mockRejectedValue(new Error("Table doesn't exist"));
+
+        await expect(myModel.customRequest("SELECT * FROM non_existent", "CRITICAL_GET")).rejects.toThrow("Table doesn't exist");
+    });
+
+    test("dropTable() - Ligne 329 - Doit rejeter la promesse si l'instruction DROP échoue", async () => {
+        const myModel = new Model("Users", { schemaDict: {} });
+        mockExecute.mockRejectedValue(new Error("Lock wait timeout exceeded"));
+
+        await expect(myModel.dropTable()).rejects.toThrow("Lock wait timeout exceeded");
     });
 });

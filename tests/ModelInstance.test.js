@@ -1,7 +1,7 @@
 const { ModelInstance } = require("../src/models/ModelInstance");
 // 1. Importez le vrai gestionnaire de connexion de votre ORM
 const connexionManager = require("../src/db/connexion");
-
+const util = require("util");
 // 2. Définissez votre structure de mock locale
 const mockExecute = jest.fn();
 const mockPool = {
@@ -278,5 +278,58 @@ describe("ModelInstance Unit Tests - v2.0.6", () => {
         const result = await instance.customRequest("SELECT * FROM test");
 
         expect(result).toEqual([{ id: 123, name: "test" }]);
+    });
+
+    test("toJSON() retourne les données locales", () => {
+        const instance = new ModelInstance("ProjectPipeline", { id: 1, name: "test" });
+
+        expect(instance.toJSON()).toEqual({ id: 1, name: "test" });
+    });
+
+    test("updateOne parse une chaîne JSON", async () => {
+        const instance = new ModelInstance(
+            "users",
+            '{"id":1,"name":"john"}'
+        );
+
+        mockExecute.mockResolvedValue([{ affectedRows: 1 }]);
+
+        await instance.updateOne({
+            name: "updated"
+        });
+
+        expect(mockExecute).toHaveBeenCalled();
+    });
+
+    test("updateOne() - Doit basculer sur le bloc catch global et exécuter le fallback", async () => {
+        // 1. On instancie normalement un ModelInstance avec un objet JSON valide
+        const mockData = { id: 10, status: "active" };
+        const instance = new ModelInstance("ProjectPipeline", mockData);
+
+        // 2. On espionne la méthode getRecordData() de cette instance spécifique
+        const spy = jest.spyOn(instance, 'getRecordData');
+
+        // 3. Premier appel (dans le try principal) : On jette une erreur pour forcer le passage au catch
+        // Deuxième appel (dans le bloc catch) : On renvoie l'objet de secours valide mockData
+        spy.mockImplementationOnce(() => {
+            throw new Error("Forced exception to enter catch block");
+        }).mockImplementationOnce(() => {
+            return mockData;
+        });
+
+        // Simule un retour positif de la base de données
+        mockExecute.mockResolvedValue([{ affectedRows: 1 }]);
+
+        // 4. Exécution de la méthode
+        const affected = await instance.updateOne({ status: "patched" });
+
+        expect(affected).toBe(1);
+        expect(mockExecute).toHaveBeenCalled();
+
+        const sqlGenerated = mockExecute.mock.calls[0][0];
+        expect(sqlGenerated).toContain("UPDATE ProjectPipeline SET `status` = 'patched' WHERE `id` = 10 AND `status` = 'active'");
+
+        // 5. On nettoie le spy pour ne pas impacter les autres tests
+        spy.mockRestore();
     });
 });

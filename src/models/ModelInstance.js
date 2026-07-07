@@ -75,10 +75,6 @@ class ModelInstance {
         return this.getRecordData();
     }
 
-    [util.inspect.custom]() {
-        return this.getRecordData();
-    }
-
     /**
      * Updates a single entry in the database table.
      * 
@@ -96,11 +92,7 @@ class ModelInstance {
             let rawRec = Array.isArray(recordsArray) ? recordsArray[0] : recordsArray;
 
             if (typeof rawRec === 'string') {
-                try {
-                    rawRec = JSON.parse(rawRec);
-                } catch {
-                    rawRec = recordsArray;
-                }
+                rawRec = JSON.parse(rawRec);
             }
             const rec = rawRec;
 

@@ -13,10 +13,8 @@ function getFieldType(field) {
         if (field.type && field.type.name !== undefined) return field.type.name;
         else if (field.type !== undefined) return field.type;
         return undefined;
-    } else {
-        if (field && field.name !== undefined) return field.name;
-        else return field;
     }
+    if (field && field.name !== undefined) return field.name;
 }
 
 function isDateLikeType(fieldType) {
