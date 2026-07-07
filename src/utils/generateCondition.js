@@ -37,9 +37,6 @@ module.exports = function (filter, isUpdate = false, schema = null) {
                 // normalize strings that may contain surrounding quotes or escaped quotes
                 if (typeof value === 'string') {
                     value = value.trim();
-                    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                        value = value.slice(1, -1);
-                    }
                     value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
                 }
                 if (Array.isArray(value)) {
@@ -67,9 +64,6 @@ module.exports = function (filter, isUpdate = false, schema = null) {
 
         if (typeof value === 'string') {
             value = value.trim();
-            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                value = value.slice(1, -1);
-            }
             value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
         }
 
@@ -92,14 +86,12 @@ module.exports = function (filter, isUpdate = false, schema = null) {
         if (fieldDef) {
             if (fieldDef.type && fieldDef.type.name !== undefined) fieldType = fieldDef.type.name;
             else if (fieldDef.type !== undefined) fieldType = fieldDef.type;
-            else if (fieldDef && fieldDef.name !== undefined) fieldType = fieldDef.name;
         }
         const normalizedFieldType = String(fieldType ?? "").toLowerCase();
         const isDateLike = ["date", "datetime", "timestamp", "now"].includes(normalizedFieldType);
 
         if (typeof value === "string") {
             let val = value;
-            // strip surrounding quotes if any (double safety)
             if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1,-1);
             // if ISO timestamp with Z, convert to MySQL DATETIME format
             if (isDateLike && /T/.test(val)) {

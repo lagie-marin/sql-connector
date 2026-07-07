@@ -1,5 +1,5 @@
 // 1. CHARGER LE MOCK EN PREMIER
-const { mockPool, mockEnd } = require('./mysqlMock'); 
+const { mockPool, mockEnd } = require('./mysqlMock');
 
 // 2. CHARGER LES MODULES DU PROJET ENSUITE
 const { connect, logout } = require('../src/db/connect'); // Ajustez le chemin vers votre dossier src
@@ -7,14 +7,14 @@ const { getConnexion } = require('../src/db/connexion');
 const mysql = require('mysql2');
 
 describe("Tests unitaires avec Mock - connect.js", () => {
-    
+
     beforeEach(() => {
         jest.clearAllMocks();
     });
 
     test("connect() devrait créer un pool mysql2 et définir la connexion globale", async () => {
         const config = { host: 'localhost', user: 'root', database: 'test' };
-        
+
         await connect(config);
 
         // Maintenant mysql.createPool est bien un mock Jest !
@@ -28,7 +28,17 @@ describe("Tests unitaires avec Mock - connect.js", () => {
         setConnexion(mockPool);
 
         await logout();
-        
+
         expect(mockEnd).toHaveBeenCalled();
+    });
+
+    test("logout() doit gérer une erreur lors de la fermeture", async () => {
+        mockPool.end.mockImplementation((callback) => {
+            callback(new Error("Close Error"));
+        });
+
+        await logout();
+
+        expect(mockPool.end).toHaveBeenCalled();
     });
 });

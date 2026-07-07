@@ -99,7 +99,7 @@ function getColumnDefinition(fieldName, field) {
     if (defaultDefinition !== null) colDef += ` ${defaultDefinition}`;
     if (field.unique) colDef += ' UNIQUE';
     if (field.auto_increment) colDef += ' AUTO_INCREMENT';
-    if (field.primary_key) colDef += ' PRIMARY KEY';
+    if (field.primary_key) colDef += ' PRIMARY KEY'
     if (typeof field.customize === 'string' && field.customize.length != 0) colDef += ` ${field.customize}`;
     return `${escapeIdentifier(fieldName)} ${colDef}`;
 }
@@ -211,18 +211,6 @@ class Model {
             return;
         }
         return `CREATE TABLE IF NOT EXISTS ${escapeIdentifier(this.name)} (${columns.join(', ')}${foreignKey.length > 0 ? ", " + foreignKey.join(', ') : ""}) ENGINE=InnoDB`;
-    }
-
-    getRecordData() {
-        return Array.isArray(this.data) ? this.data[0] ?? this.data : this.data;
-    }
-
-    toJSON() {
-        return this.getRecordData()?.data;
-    }
-
-    [util.inspect.custom]() {
-        return this.getRecordData();
     }
 
     /**
@@ -346,7 +334,7 @@ class Model {
                 return resolve(1);
             }).catch((err) => {
                 error(`Error executing query delete: ${err}`);
-                return 0;
+                reject(err)
             });
         });
     }

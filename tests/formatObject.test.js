@@ -34,4 +34,13 @@ describe('Utils - formatObject.js', () => {
         expect(result.age).toBe(25);
         expect(result.isValid).toBe(true);
     });
+
+    test("formatObject couvre hasOwnProperty", () => {
+        const parent = { test: 1 };
+        const obj = Object.create(parent);
+
+        obj.name = "john";
+
+        formatObject(obj);
+    });
 });

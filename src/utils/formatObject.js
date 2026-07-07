@@ -4,6 +4,7 @@ module.exports = function (obj) {
     for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
             const value = getSafe(obj, key);
+
             if (value instanceof Date) {
                 // convert Date to MySQL DATETIME (no timezone)
                 setSafe(obj, key, value.toISOString().slice(0, 19).replace('T', ' '));

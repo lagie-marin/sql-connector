@@ -76,27 +76,92 @@ describe('Utils - buildQuery.js', () => {
             expect(() => buildQueryParts({ limit: 'abc' })).toThrow('Invalid LIMIT value');
         });
     });
-});
+    describe('buildQuery - Advanced Fields & Aggregations', () => {
 
-describe('buildQuery - Advanced Fields & Aggregations', () => {
+        test('Should safely compile COUNT(*) aggregated calculations with an expression alias', () => {
+            const fields = [{ count: '*', as: 'total_user' }];
+            expect(buildSelect(fields)).toBe('COUNT(*) AS `total_user`');
+        });
 
-    test('Should safely compile COUNT(*) aggregated calculations with an expression alias', () => {
-        const fields = [{ count: '*', as: 'total_user' }];
-        expect(buildSelect(fields)).toBe('COUNT(*) AS `total_user`');
+        test('Should safely compile COUNT(column) on structured column identifiers', () => {
+            const fields = [{ count: 'id', as: 'unique_ids' }];
+            expect(buildSelect(fields)).toBe('COUNT(`id`) AS `unique_ids`');
+        });
+
+        test('Should correctly process multi-column GROUP BY arrays to avoid ONLY_FULL_GROUP_BY validation issues', () => {
+            const options = {
+                select: ['status', 'email', { count: '*', as: 'total_user' }],
+                groupBy: ['status', 'email']
+            };
+            const parts = buildQueryParts(options);
+
+            expect(parts).toContain('GROUP BY `status`, `email`');
+        });
     });
 
-    test('Should safely compile COUNT(column) on structured column identifiers', () => {
-        const fields = [{ count: 'id', as: 'unique_ids' }];
-        expect(buildSelect(fields)).toBe('COUNT(`id`) AS `unique_ids`');
+    describe("buildQuery - buildGroupByItem", () => {
+        test('Return directly an error if group is not a string.', () => {
+            const options = {
+                select: ['status', 'email', { count: '*', as: 'total_user' }],
+                groupBy: ['status', 1255]
+            };
+
+            expect(() => buildQueryParts(options)).toThrow(
+                "Error: Group by items must be strings"
+            );
+        })
+    })
+
+    test('Devrait gérer DISTINCT avec alias', () => {
+        const fields = [
+            {
+                distinct: 'email',
+                as: 'unique_email'
+            }
+        ];
+
+        expect(buildSelect(fields))
+            .toBe('DISTINCT `email` AS `unique_email`');
     });
 
-    test('Should correctly process multi-column GROUP BY arrays to avoid ONLY_FULL_GROUP_BY validation issues', () => {
-        const options = { 
-            select: ['status', 'email', { count: '*', as: 'total_user' }], 
-            groupBy: ['status', 'email'] 
-        };
-        const parts = buildQueryParts(options);
+    test("GROUP BY simple", () => {
+        expect(
+            buildQueryParts({
+                groupBy: ["status"]
+            })
+        ).toBe("GROUP BY `status`");
+    });
 
-        expect(parts).toContain('GROUP BY `status`, `email`');
+    test("count simple", () => {
+        expect(
+            buildSelect([
+                {  count: "id"}
+            ])
+        ).toBe("COUNT(`id`)");
+    });
+
+
+    test("buildSelect supporte *", () => {
+        expect(
+            buildSelect(["*"])
+        ).toBe("*");
+    });
+
+    test("SUM sans alias génère un alias automatique", () => {
+        expect(
+            buildSelect([
+                {
+                    sum: "price"
+                }
+            ])
+        ).toBe("SUM(`price`) AS `price`");
+    });
+
+    test("LIMIT décimal invalide", () => {
+        expect(() =>
+            buildQueryParts({
+                limit: 10.5
+            })
+        ).toThrow();
     });
 });

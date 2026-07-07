@@ -38,4 +38,204 @@ describe('Utils - generateCondition.js', () => {
         const filter = { name: '"Alice"' };
         expect(generateCondition(filter, false)).toBe("`name` = 'Alice'");
     });
+
+    test("generateCondition utilise les champs unique du schema", () => {
+        const result = generateCondition(
+            { email: "john@test.fr" },
+            false,
+            {
+                schemaDict: {
+                    email: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("email");
+    });
+
+    test("generateCondition génère un IN pour les champs uniques tableau", () => {
+        const result = generateCondition(
+            { email: ["a@test.fr", "b@test.fr"] },
+            false,
+            {
+                schemaDict: {
+                    email: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("IN");
+    });
+
+    test("generateCondition génère un JSON_CONTAINS pour objet unique", () => {
+        const result = generateCondition(
+            {
+                metadata: {
+                    role: "admin"
+                }
+            },
+            false,
+            {
+                schemaDict: {
+                    metadata: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("JSON_CONTAINS");
+    });
+
+    test("generateCondition génère IS NULL pour champ unique", () => {
+        const result = generateCondition(
+            { email: null },
+            false,
+            {
+                schemaDict: {
+                    email: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("IS NULL");
+    });
+
+    test("generateCondition convertit une date ISO sur champ unique", () => {
+        const result = generateCondition(
+            {
+                created_at: "2025-01-01T10:00:00Z"
+            },
+            false,
+            {
+                schemaDict: {
+                    created_at: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("2025-01-01 10:00:00");
+    });
+
+    test("generateCondition update JSON", () => {
+        const result = generateCondition(
+            {
+                metadata: {
+                    role: "admin"
+                }
+            },
+            true
+        );
+
+        expect(result).toContain("=");
+        expect(result).not.toContain("JSON_CONTAINS");
+    });
+
+    test("generateCondition filtre JSON", () => {
+        const result = generateCondition(
+            {
+                metadata: {
+                    role: "admin"
+                }
+            },
+            false
+        );
+
+        expect(result).toContain("JSON_CONTAINS");
+    });
+
+    test("generateCondition retourne une condition simple", () => {
+        const result = generateCondition(
+            { id: 42 },
+            false
+        );
+
+        expect(result).toContain("42");
+    });
+
+    test("generateCondition retire les guillemets doubles entourant une valeur", () => {
+        const result = generateCondition(
+            { name: '"john"' },
+            false,
+            {
+                schemaDict: {
+                    name: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("john");
+        expect(result).not.toContain('"john"');
+    });
+
+    test("generateCondition utilise JSON_CONTAINS avec une chaîne JSON", () => {
+        const result = generateCondition(
+            {
+                metadata: '{"role":"admin"}'
+            },
+            false,
+            {
+                schemaDict: {
+                    metadata: {
+                        unique: true
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("JSON_CONTAINS");
+    });
+
+    test("generateCondition détecte une chaîne JSON", () => {
+        const result = generateCondition({
+            metadata: '{"role":"admin"}'
+        });
+
+        expect(result).toContain("JSON_CONTAINS");
+    });
+
+    test("generateCondition supporte fieldDef.type string", () => {
+        generateCondition(
+            {
+                created_at: "2025-01-01T10:00:00Z"
+            },
+            false,
+            {
+                schemaDict: {
+                    created_at: {
+                        type: "Date"
+                    }
+                }
+            }
+        );
+    });
+
+    test("generateCondition convertit une date ISO pour un champ Date", () => {
+        const result = generateCondition(
+            {
+                created_at: "2025-01-01T10:00:00Z"
+            },
+            false,
+            {
+                schemaDict: {
+                    created_at: {
+                        type: Date
+                    }
+                }
+            }
+        );
+
+        expect(result).toContain("2025-01-01 10:00:00");
+    });
+
 });
