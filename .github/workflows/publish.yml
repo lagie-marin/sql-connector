@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 22
       - name: Install deps
-        run: npm ci
+        run: npm i
       - name: Audit deps
         continue-on-error: false
         run: |
@@ -42,7 +42,7 @@ jobs:
       with:
         node-version: 22
     - name: Install deps
-      run: npm ci
+      run: npm i
     - name: Run integrity check
       continue-on-error: false
       run: |
@@ -51,7 +51,7 @@ jobs:
     needs: 
       - check_security
       - integrity
-    if: github.event_name == 'release' || github.event.action == 'edited'
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment: sqlc
     permissions:
@@ -68,5 +68,5 @@ jobs:
       - name: Update npm and Publish
         run: |
           npm install -g npm@10
-          npm ci
+          npm i
           npm publish --provenance --access public
