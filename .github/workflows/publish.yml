@@ -51,7 +51,7 @@ jobs:
     needs: 
       - check_security
       - integrity
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event.action == 'edited'
     runs-on: ubuntu-latest
     environment: sqlc
     permissions:
