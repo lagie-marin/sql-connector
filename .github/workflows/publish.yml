@@ -15,15 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout GH repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Install deps
         run:
           npm install -g npm@10
-          npm ci
+          npm i
       - name: Audit deps
         continue-on-error: false
         run: |
@@ -36,15 +36,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout GH repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: setup node
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: 22
     - name: Install deps
       run:
         npm install -g npm@10
-        npm ci
+        npm i
     - name: Run integrity check
       continue-on-error: false
       run: |
@@ -61,8 +61,8 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -70,5 +70,5 @@ jobs:
       - name: Update npm and Publish
         run: |
           npm install -g npm@10
-          npm ci
+          npm i
           npm publish --provenance --access public
