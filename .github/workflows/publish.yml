@@ -24,6 +24,13 @@ jobs:
         run:
           npm install -g npm@10
           npm i
+      - name: Debug ESLint
+        run: |
+          node -v
+          npm -v
+          ls -la node_modules/.bin
+          npm ls eslint
+          npm ls @eslint/js
       - name: Audit deps
         continue-on-error: false
         run: |
