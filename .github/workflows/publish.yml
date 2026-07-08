@@ -1,5 +1,7 @@
 name: Publish Package
 
+env:
+  NODE_ENV: development
 on:
   release:
     types: [published]
@@ -21,16 +23,7 @@ jobs:
         with:
           node-version: 22
       - name: Install deps
-        run:
-          npm install -g npm@10
-          npm i
-      - name: Debug ESLint
-        run: |
-          node -v
-          npm -v
-          ls -la node_modules/.bin
-          npm ls eslint
-          npm ls @eslint/js
+        run: npm ci
       - name: Audit deps
         continue-on-error: false
         run: |
@@ -49,9 +42,7 @@ jobs:
       with:
         node-version: 22
     - name: Install deps
-      run:
-        npm install -g npm@10
-        npm i
+      run: npm ci
     - name: Run integrity check
       continue-on-error: false
       run: |
@@ -77,5 +68,5 @@ jobs:
       - name: Update npm and Publish
         run: |
           npm install -g npm@10
-          npm i
+          npm ci
           npm publish --provenance --access public
