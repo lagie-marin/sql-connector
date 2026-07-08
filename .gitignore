@@ -1,5 +1,4 @@
 node_modules
-*-lock.json
 publish
 env.sh
 coverage
