@@ -1,0 +1,4 @@
+version: 2
+project:
+  # Masquer les alertes des outils de dev/test dans le rapport
+  ignoreDevDependencies: true
