@@ -3,6 +3,14 @@
   "version": "2.0.6",
   "description": "Le module sql-connector permet de gérer les connexions à une base de données MySQL, de définir des schémas de tables, et d'interagir avec les données de manière simple et efficace.",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
   "scripts": {
     "test": "rm -r coverage ; node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:publish": "npm publish --dry-run",
