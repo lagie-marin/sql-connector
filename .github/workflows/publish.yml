@@ -1,7 +1,4 @@
 name: Publish Package
-
-env:
-  NODE_ENV: development
 on:
   release:
     types: [published, edited]
