@@ -4,7 +4,7 @@ env:
   NODE_ENV: development
 on:
   release:
-    types: [published]
+    types: [published, edited]
   push:
     branches:
       - "**"
