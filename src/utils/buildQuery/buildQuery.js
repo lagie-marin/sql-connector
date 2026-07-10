@@ -1,6 +1,7 @@
-const formatObject = require("./formatObject");
-const generateCondition = require("./generateCondition");
-const { escapeIdentifier, escapeOrderDirection, escapeValue } = require("./sql");
+const formatObject = require("../formatObject");
+const generateCondition = require("../generateCondition");
+const { escapeIdentifier, escapeOrderDirection, escapeValue } = require("../sql");
+const count = require("./count");
 
 function buildGroupByItem(group) {
     if (typeof group !== 'string') {
@@ -40,8 +41,7 @@ function buildField(field) {
     else if (field.distinct)
         sql = `DISTINCT ${escapeIdentifier(field.distinct)}`;
     else if (field.count)
-        sql = `COUNT(${escapeIdentifier(field.count)})`;
-
+        sql = count(field.count);
     if (field.as)
         sql += ` AS ${escapeIdentifier(field.as)}`;
     else if (field.sum)
