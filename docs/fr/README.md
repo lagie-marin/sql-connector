@@ -147,25 +147,53 @@ async function createUser(email, stat) {
 
 ## Fonction find
 
-Récupère des entrées de la table.
+Récupère des enregistrements de la table.
 
-- **Parameters** `options` *(Object)* - Options de requête
-- **Parameters** `options.select` *(string[])* - Champs à renvoyer.
-- **Parameters** `options.where` *(Object)* - Filtre (key/value).
-- **Parameters** `options.order` *(Array)* - Ex: [['points', 'DESC']]
-- **Parameters** `options.limit` *(number)* - Limite de résultats.
-- **Returns** `Promise<Array<ModelInstance>>`
+- **Paramètres** `options` *(Object)* – Options de la requête.
+- **Paramètres** `options.select` *(Array<string|SelectAggregation>)* – Champs, agrégations ou transformations à retourner.
+- **Paramètres** `options.where` *(Object / string)* – Conditions de filtrage (objet clé/valeur ou clause brute sous forme de chaîne).
+- **Paramètres** `options.groupBy` *(string[])* – Champs utilisés pour grouper les résultats.
+- **Paramètres** `options.orderBy` *(Array<string|OrderByOption>)* – Règles de tri.
+- **Paramètres** `options.join` *(JoinOption / JoinOption[])* – Structures de configuration pour les jointures de tables.
+- **Paramètres** `options.limit` *(number)* – Nombre maximal de résultats à retourner.
+- **Retourne** `Promise<Array<ModelInstance>>`
 
-### Options de find
+### Options avancées de `select` (`SelectAggregation`)
 
-| Option     | Type            | Description                                              | Example                                      |
-|------------|-----------------|----------------------------------------------------------|----------------------------------------------|
-| `select`   | Array           | Champs ou transformations à récupérer                    | `['date_day']`                               |
-| `where`    | Object / String | Conditions de filtrage                                   | `{ project_id: 1 }`                          |
-| `groupBy`  | Array           | Champs utilisés pour regrouper les résultats             | `['period']`                                 |
-| `orderBy`  | Array           | Règles de tri                                            | `[{ field: 'date_day', direction: 'DESC' }]` |
-| `having`   | String          | Clause HAVING pour les requêtes agrégées                 | `'SUM(total_runs) > 100'`                    |
-| `limit`    | Number          | Limite le nombre de résultats                            | `100`                                        |
+Chaque élément du tableau `select` peut être soit une chaîne de caractères standard (nom brut de la colonne), soit un objet offrant des fonctionnalités SQL et des agrégations avancées :
+
+| Propriété dans l'objet `select` | Type              | Description                                                                                               |                                     Exemple / SQL Généré                                            |
+|---------------------------------|-------------------|-----------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `col`                           | `string`          | Sélectionne une colonne de table simple, sans agrégation.                                                 | `{ col: 'email' }` $\rightarrow$ \`email\`                                                          |
+| `sum`                           | `string`          | Calcule la somme de toutes les valeurs numériques d'une colonne.                                          | `{ sum: 'error' }` $\rightarrow$ `SUM(`\`error\``)`                                                 |
+| `distinct`                      | `string`          | Applique une contrainte DISTINCT sur la colonne spécifiée.                                                | `{ distinct: 'status' }` $\rightarrow$ `DISTINCT `\`status\`                                        |
+| `dateFormat`                    | `[string, string]`| Formate une colonne de type Date en utilisant le formatage standard MySQL (`[colonne, chaine_de_format]`).| `{ dateFormat: ['created_at', '%Y-%m'] }` $\rightarrow$ `DATE_FORMAT(`\`created_at\``, '%Y-%m')`    |
+| `count`                         | `string`          | Comptage de lignes standard (ignore les valeurs `NULL`).                                                  | `{ count: 'id' }` $\rightarrow$ `COUNT(`\`id\``)`                                                   |
+| `count` (Array)                 | `string[]`        | Calcule le nombre de combinaisons uniques sur plusieurs colonnes (COUNT DISTINCT).                        | `{ count: ['team', 'source'] }` $\rightarrow$ `COUNT( DISTINCT `\`team\``, `\`source\`` )`          |
+| `count` (Object)                | `Object`          | Agrégation conditionnelle automatisée (`CASE WHEN`). Idéal pour les indicateurs clés (KPIs) et statuts.   | `{ count: { deletedAt: null } }` $\rightarrow$ `COUNT(CASE WHEN `\`deletedAt\`` = NULL THEN 1 END)` |
+| `as`                            | `string`          | Définit un identifiant de sortie personnalisé ou un alias d'agrégation (SQL `AS`).                        | `{ count: 'id', as: 'total' }` $\rightarrow$ `COUNT(`\`id\``) AS `\`total\`                         |
+
+---
+
+### Options complexes structurées (`orderBy` & `join`)
+
+#### OrderByOption
+
+Permet d'appliquer un tri explicite sur une ou plusieurs colonnes :
+
+- **field** `(string)` : Le nom de la colonne cible sur laquelle appliquer le tri.
+- **direction** `('ASC'\|'DESC')` : Le sens du tri (Par défaut : `'ASC'`).
+
+#### JoinOption
+
+Spécifie une ou plusieurs jointures de tables relationnelles :
+
+- **table** `(string)` : Nom de la table cible à joindre.
+- **on** `(string)` : Chaîne de caractères représentant la condition de jointure (ex: `"MyTable.project_id = Projects.id"`).
+- **alias** `(string)` *(Optionnel)* : Un alias SQL alternatif pour la table jointe.
+- **type** `('INNER'\|'LEFT'\|'RIGHT')` *(Optionnel)* : Type de jointure SQL (Par défaut : `'INNER'`).
+
+---
 
 ## Exemple find
 
@@ -195,6 +223,73 @@ await User.find({
     id: 1
   }
 })
+```
+
+### Exemples avancés avec `find`
+
+#### 1. Comptage standard, distinct et multi-colonnes
+
+Comptez les lignes globales parallèlement à des combinaisons uniques multi-colonnes, comme l'identification des couples uniques d'équipes et de sources de pipelines :
+
+```js
+const { MyTable } = require("./models");
+
+const stats = await MyTable.find({
+  select: [
+    { count: 'id', as: 'total_pipelines' },
+    { count: ['cteam', 'csource'], as: 'unique_groups' } // COUNT DISTINCT multi-colonnes
+  ],
+  where: { csource: 'web' }
+});
+```
+
+#### 2. Agrégations conditionnelles (Indicateurs KPIs Actifs / Inactifs)
+
+En passant un objet à l'attribut count, l'ORM structure automatiquement une clause conditionnelle CASE WHEN. Cela vous permet de ventiler différents compteurs de statuts en une seule et unique requête vers la base de données :
+
+```js
+const { ProjectPipeline } = require("./models");
+
+const ppiStats = await ProjectPipeline.find({
+  select: [
+    { count: { deletedAt: null }, as: 'active' },          // Compte les lignes où deletedAt = NULL
+    { count: { status: 'SUCCESS' }, as: 'total_success' }   // Compte les lignes où status = 'SUCCESS'
+  ],
+  where: {
+    source: 'jenkins',
+    team: 'GROUP-1'
+  }
+});
+
+// Format du tableau de sortie retourné : [{ active: 6, total_success: 42 }]
+```
+
+#### 3. Jointures de tables, groupement temporel et tri multi-colonnes
+
+Une orchestration de requête avancée combinant une jointure gauche (LEFT JOIN), des conversions de formats de date et des tris :
+
+```js
+const { ProjectPipeline } = require("./models");
+
+const history = await ProjectPipeline.find({
+  select: [
+    { col: 'Projects.name', as: 'project_name' },
+    { dateFormat: ['MyTable.created_at', '%Y-%m'], as: 'period' },
+    { count: 'MyTable.id', as: 'pipelines_count' }
+  ],
+  where: "MyTable.deletedAt IS NULL", // Les chaînes de conditions brutes sont autorisées
+  join: {
+    table: 'Projects',
+    on: 'MyTable.project_id = Projects.id',
+    type: 'LEFT'
+  },
+  groupBy: ['project_name', 'period'],
+  orderBy: [
+    { field: 'period', direction: 'DESC' },
+    { field: 'project_name', direction: 'ASC' }
+  ],
+  limit: 50
+});
 ```
 
 ## Fonction count

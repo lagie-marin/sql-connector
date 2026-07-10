@@ -184,23 +184,51 @@ async function createUser(email, stat) {
 
 Retrieves entries from the table.
 
-- **Parameters** `options` *(Object)* - Query options
-- **Parameters** `options.select` *(string[])* - Fields to be returned.
-- **Parameters** `options.where` *(Object)* - Filters (key/value).
-- **Parameters** `options.order` *(Array)* - Ex: [['points', 'DESC']]
-- **Parameters** `options.limit` *(number)* - Limit of results.
+- **Parameters** `options` *(Object)* - Query options.
+- **Parameters** `options.select` *(Array<string|SelectAggregation>)* - Fields, aggregations, or transformations to be returned.
+- **Parameters** `options.where` *(Object / string)* - Filtering conditions (key/value object or raw string condition).
+- **Parameters** `options.groupBy` *(string[])* - Fields used to group results.
+- **Parameters** `options.orderBy` *(Array<string|OrderByOption>)* - Sorting rules.
+- **Parameters** `options.join` *(JoinOption / JoinOption[])* - Table join configuration structures.
+- **Parameters** `options.limit` *(number)* - Maximum number of results to return.
 - **Returns** `Promise<Array<ModelInstance>>`
 
-### find Options
+### Advanced `select` Options (`SelectAggregation`)
 
-| Option     | Type            | Description                                              | Example                                      |
-|------------|-----------------|----------------------------------------------------------|----------------------------------------------|
-| `select`   | Array           | Fields or transformations to retrieve                    | `['date_day']`                               |
-| `where`    | Object / String | Filtering conditions                                     | `{ project_id: 1 }`                          |
-| `groupBy`  | Array           | Fields used to group results                             | `['period']`                                 |
-| `orderBy`  | Array           | Sorting rules                                            | `[{ field: 'date_day', direction: 'DESC' }]` |
-| `having`   | String          | HAVING clause for aggregated queries                     | `'SUM(total_runs) > 100'`                    |
-| `limit`    | Number          | Limits the number of results                             | `100`                                        |
+Each element in the `select` array can be either a standard string (raw column name) or an object providing advanced SQL capabilities and aggregations:
+
+| Property inside `select` object | Type              | Description                                                                                          |                                  Example / Generated SQL                                           |
+|---------------------------------|-------------------|------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `col`                           | `string`          | Selects a plain, unaggregated table column.                                                          | `{ col: 'email' }` $\rightarrow$ \`email\`                                                         |
+| `sum`                           | `string`          | Computes the sum of all numerical values in a column.                                                | `{ sum: 'error' }` $\rightarrow$ `SUM(` \`error\``)`                                               |
+| `distinct`                      | `string`          | Applies a DISTINCT constraint on the specified column.                                               | `{ distinct: 'status' }` $\rightarrow$ `DISTINCT` \`status\`                                       |
+| `dateFormat`                    | `[string, string]`| Formats a Date column using standard MySQL formatting (Format: `[column, mysql_format_string]`).     | `{ dateFormat: ['created_at', '%Y-%m'] }` $\rightarrow$ `DATE_FORMAT(` \`created_at\``, '%Y-%m')`  |
+| `count`                         | `string`          | Standard row counting (ignores `NULL` values).                                                       | `{ count: 'id' }` $\rightarrow$ `COUNT(` \`id\``)`                                                 |
+| `count` (Array)                 | `string[]`        | Counts unique combinations across multiple columns (COUNT DISTINCT).                                 | `{ count: ['team', 'source'] }` $\rightarrow$ `COUNT( DISTINCT` \`team\``,` \`source\``)`          |
+| `count` (Object)                | `Object`          | Automated conditional aggregation (`CASE WHEN`). Perfect for KPIs and status metrics.                | `{ count: { deletedAt: null } }` $\rightarrow$ `COUNT(CASE WHEN` \`deletedAt\``= NULL THEN 1 END)` |
+| `as`                            | `string`          | Sets a custom output identifier or aggregation alias (SQL `AS`).                                     | `{ count: 'id', as: 'total' }` $\rightarrow$ `COUNT(` \`id\``) AS` \`total\`                       |
+
+---
+
+### Complex Structured Options (`orderBy` & `join`)
+
+#### OrderByOption
+
+Enables explicit sorting across one or multiple columns:
+
+- **field** `(string)`: The target column name to apply sorting on.
+- **direction** `('ASC'\|'DESC')`: The sorting direction (Defaults to `'ASC'`).
+
+#### JoinOption
+
+Specifies one or multiple relational database table joins:
+
+- **table** `(string)`: Target table name to join with.
+- **on** `(string)`: Relational equation statement string (e.g., `"ProjectPipelines.project_id = Projects.id"`).
+- **alias** `(string)` *(Optional)*: An alternative SQL alias name for the joined table.
+- **type** `('INNER'\|'LEFT'\|'RIGHT')` *(Optional)*: SQL join modality (Defaults to `'INNER'`).
+
+---
 
 ## Example find
 
@@ -230,6 +258,71 @@ User.find({
     id: 1
   }
 })
+```
+
+### Advanced Examples using `find`
+
+#### 1. Standard, Distinct, and Multi-Column Counting
+
+Count global rows alongside multi-column unique combinations, such as identifying unique team and source pipelines:
+
+```js
+const { MyTable } = require("./models");
+
+const stats = await MyTable.find({
+  select: [
+    { count: 'id', as: 'total_pipelines' },
+    { count: ['cteam', 'csource'], as: 'unique_groups' } // Multi-column COUNT DISTINCT
+  ],
+  where: { csource: 'web' }
+});
+```
+
+#### 2. Conditional Aggregations (Active / Decommissioned KPI Metrics)
+
+By passing an object to the `count` attribute, the ORM automatically structures a conditional `CASE WHEN` clause. This allows you to split different status counters into a single database trip:
+
+```js
+const { MyTable } = require("./models");
+
+const ppiStats = await MyTable.find({
+  select: [
+    { count: { deletedAt: null }, as: 'active' },          // Counts where deletedAt = NULL
+    { count: { status: 'SUCCESS' }, as: 'total_success' }   // Counts where status = 'SUCCESS'
+  ],
+  where: {
+    source: 'jenkins',
+    team: 'GROUP-1'
+  }
+});
+```
+
+#### 3. Table Joins, Time Series Grouping, and Multi-Column Sorting
+
+An advanced query orchestration combining left table joining, date formatting conversions, and sorting:
+
+```js
+const { MyTable } = require("./models");
+
+const history = await MyTable.find({
+  select: [
+    { col: 'Projects.name', as: 'project_name' },
+    { dateFormat: ['ProjectPipelines.created_at', '%Y-%m'], as: 'period' },
+    { count: 'ProjectPipelines.id', as: 'pipelines_count' }
+  ],
+  where: "ProjectPipelines.deletedAt IS NULL", // Raw condition strings are permitted
+  join: {
+    table: 'Projects',
+    on: 'ProjectPipelines.project_id = Projects.id',
+    type: 'LEFT'
+  },
+  groupBy: ['project_name', 'period'],
+  orderBy: [
+    { field: 'period', direction: 'DESC' },
+    { field: 'project_name', direction: 'ASC' }
+  ],
+  limit: 50
+});
 ```
 
 ## count function
