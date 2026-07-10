@@ -15,7 +15,8 @@
     "url": "git+https://github.com/lagie-marin/sql-connector.git"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "keywords": [
     "sql",

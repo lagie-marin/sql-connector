@@ -69,32 +69,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-      id-token: write
+      id-token: write # Requis pour la provenance (--provenance)
 
     steps:
-      # 1. Récupérer le code source du dépôt
+      # 1. Récupérer le code source
       - name: Checkout du code
         uses: actions/checkout@v6
 
-      # 2. Configurer Node.js et pointer vers le registre GitHub Packages
+      # 2. Configurer Node.js pour registry.npmjs.org
       - name: Configurer Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "22" # Modifiez selon votre version de Node
-          registry-url: "https://npm.pkg.github.com"
-          # Définit la portée (scope) automatique, ex: @votre-nom-utilisateur
-          scope: "@mlagie"
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org/" # <-- Cible npmjs
 
-      # 3. Installer les dépendances du projet
+      # 3. Installer les dépendances
       - name: Installer les dépendances
         run: npm ci
 
-      # 4. Publier le package
-      # Le NODE_AUTH_TOKEN est automatiquement géré par l'action setup-node.
-      # GITHUB_TOKEN possède les droits suffisants grâce au bloc permissions ci-dessus.
-      - name: Publier sur GitHub Packages
-        run: |
-          npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_GITHUB_TOKEN }}
+      # 4. Publier sur le vrai registre npm
+      - name: Publier sur npmjs.com
+        run: npm publish --provenance
