@@ -80,6 +80,6 @@ jobs:
           scope: "@mlagie"
       - name: Update npm and Publish
         run: |
-          npm install -g npm@latest
+          npm install -g npm@10
           npm ci
           npm publish --provenance --access public
