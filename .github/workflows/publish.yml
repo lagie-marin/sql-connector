@@ -75,4 +75,4 @@ jobs:
 
       # 4. Publier sur le vrai registre npm
       - name: Publier sur npmjs.com
-        run: npm publish --provenance
+        run: npm publish --provenance --access public
