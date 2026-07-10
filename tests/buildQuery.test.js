@@ -11,12 +11,12 @@ describe('Utils - buildQuery.js', () => {
             expect(buildSelect(['id', 'name'])).toBe('`id`,\n`name`');
         });
 
-        test('Devrait gérer l’agrégation SUM avec alias optionnel', () => {
+        test('Devrait gérer l\'agrégation SUM avec alias optionnel', () => {
             expect(buildSelect([{ sum: 'price' }])).toBe('SUM(`price`) AS `price`');
             expect(buildSelect([{ sum: 'price', as: 'total' }])).toBe('SUM(`price`) AS `total`');
         });
 
-        test('Devrait gérer DATE_FORMAT et appliquer l’échappement sur la colonne', () => {
+        test('Devrait gérer DATE_FORMAT et appliquer l\'échappement sur la colonne', () => {
             const select = [{ dateFormat: ['createdAt', '%Y-%m'], as: 'month' }];
             expect(buildSelect(select)).toBe("DATE_FORMAT(`createdAt`, '%Y-%m') AS `month`");
         });
