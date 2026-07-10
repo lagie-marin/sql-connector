@@ -60,28 +60,28 @@ jobs:
         continue-on-error: false
         run: |
           npm run test:publish
-publish:
-  needs:
-    - check_security
-    - integrity
-    - check_publish
-  if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-  runs-on: ubuntu-latest
-  environment: sqlc
-  permissions:
-    contents: read
-    id-token: write # Indispensable pour le flux Trusted Publisher (OIDC)
+  publish:
+    needs:
+      - check_security
+      - integrity
+      - check_publish
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: sqlc
+    permissions:
+      contents: read
+      id-token: write # Indispensable pour le flux Trusted Publisher (OIDC)
 
-  steps:
-    - uses: actions/checkout@v6
+    steps:
+      - uses: actions/checkout@v6
 
-    # Utiliser Node 20 plutôt que Node 22 évite le bug interne d'npm lié à 'sigstore'
-    # tout en restant parfaitement compatible avec la publication et la provenance.
-    - uses: actions/setup-node@v6
-      with:
-        node-version: 20
-        registry-url: "https://registry.npmjs.org"
+      # Utiliser Node 20 plutôt que Node 22 évite le bug interne d'npm lié à 'sigstore'
+      # tout en restant parfaitement compatible avec la publication et la provenance.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
 
-    - name: Install dependencies and Publish
-      run: |
-        npm publish --provenance --access public --auth-type=oidc
+      - name: Install dependencies and Publish
+        run: |
+          npm publish --provenance --access public --auth-type=oidc
