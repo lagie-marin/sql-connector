@@ -77,10 +77,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-          scope: "@mlagie"
-          
-      # Plus besoin de 'npm install -g npm@latest' ici !
       - name: Install dependencies and Publish
         run: |
           npm ci
