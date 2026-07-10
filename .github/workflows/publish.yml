@@ -75,11 +75,11 @@ jobs:
     steps:
       # 1. Récupérer le code source du dépôt
       - name: Checkout du code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # 2. Configurer Node.js et pointer vers le registre GitHub Packages
       - name: Configurer Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22" # Modifiez selon votre version de Node
           registry-url: "https://npm.pkg.github.com"
