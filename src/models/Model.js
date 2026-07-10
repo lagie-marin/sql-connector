@@ -4,7 +4,7 @@ const { getConnexion } = require("../db/connexion");
 const generateCondition = require("../utils/generateCondition");
 const formatObject = require("../utils/formatObject");
 const { ModelInstance } = require("./ModelInstance");
-const { buildSelect, buildQueryParts } = require("../utils/buildQuery");
+const { buildSelect, buildQueryParts } = require("../utils/buildQuery/buildQuery");
 const { getSafe, setSafe } = require("../utils/security/safe");
 const { escapeIdentifier, escapeIdentifierList } = require("../utils/sql");
 
@@ -231,23 +231,40 @@ class Model {
 
     /**
      * @typedef {Object} SelectAggregation
-     * @property {string} [sum] - The name of the column to sum (e.g., "total_runs").
-     * @property {string} [count] - The name of the column to count.
-     * @property {string[]} [dateFormat] - Array with [column, format] (e.g., ["date_day", "%Y-%m-%d"]).
-     * @property {string} as - The output alias for the SQL field (e.g., "total_runs" or "period").
+     * @property {string} [col] - Le nom brut de la colonne à récupérer sans agrégation.
+     * @property {string} [sum] - Le nom de la colonne à additionner (ex: "total_runs").
+     * @property {string} [distinct] - Applique le mot-clé DISTINCT sur la colonne spécifiée.
+     * @property {string | string[] | Object} [count] - Compte les lignes selon le format fourni :
+     * - `string`: Compte toutes les valeurs non-nulles de cette colonne (ex: "id").
+     * - `string[]`: Compte les combinaisons uniques de plusieurs colonnes (COUNT DISTINCT col1, col2).
+     * - `Object`: Comptage conditionnel (CASE WHEN clé = valeur THEN 1 END). Ex: { deletedAt: null }.
+     * @property {string[]} [dateFormat] - Tableau au format [colonne, format_mysql] (ex: ["date_day", "%Y-%m-%d"]).
+     * @property {string} [as] - Alias d'extraction SQL pour le champ (ex: "total_runs" ou "period").
      */
 
     /**
-     * Retrieves multiple entries from the table.
-     * @param {Object} [options] - Query options (attributes, where, order, limit).
-     * @param {Array<string|SelectAggregation>} [options.select] - Fields to return.
-     * @param {Object} [options.where] - Filters (key/value).
-     * @param {Array} [options.order] - Example: [['points', 'DESC']]
-     * @param {number} [options.limit] - Result limit.
-     * @param {Object} [options.join] - Join options.
-     * @param {String} [options.join.table] - Table to join.
-     * @param {String} [options.join.on] - Join condition.
-     * @param {String} [options.join.alias] - Alias for the joined table.
+     * @typedef {Object} OrderByOption
+     * @property {string} field - Le nom de la colonne sur laquelle appliquer le tri.
+     * @property {'ASC'|'DESC'} [direction] - La direction du tri (Par défaut : 'ASC').
+     */
+
+    /**
+     * @typedef {Object} JoinOption
+     * @property {string} table - Le nom de la table cible avec laquelle effectuer la jointure.
+     * @property {string} on - La condition de correspondance de la jointure (ex: "ProjectPipelines.project_id = Projects.id").
+     * @property {string} [alias] - Alias SQL optionnel à donner à la table jointe.
+     * @property {'INNER'|'LEFT'|'RIGHT'} [type] - Le type de jointure SQL à appliquer (Par défaut : 'INNER').
+     */
+
+    /**
+     * Récupère plusieurs entrées de la table correspondante.
+     * @param {Object} [options] - Options de configuration de la requête SQL.
+     * @param {Array<string|SelectAggregation>} [options.select] - Liste des champs, transformations ou agrégations à retourner.
+     * @param {Object|string} [options.where] - Filtres structurés (objet clé/valeur) ou clause WHERE brute sous forme de chaîne.
+     * @param {string[]} [options.groupBy] - Tableau de colonnes ou d'expressions pour grouper les résultats (ex: ["period"]).
+     * @param {Array<string|OrderByOption>} [options.orderBy] - Règles de tri des résultats.
+     * @param {number} [options.limit] - Limite maximale du nombre de lignes à retourner.
+     * @param {JoinOption | JoinOption[]} [options.join] - Option(s) de jointure avec d'autres tables de la base de données.
      * @returns {Promise<Array<ModelInstance>>}
      */
     async find(options = {}) {
