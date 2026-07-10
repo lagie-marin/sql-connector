@@ -33,18 +33,18 @@ jobs:
   integrity:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout GH repository
-      uses: actions/checkout@v6
-    - name: setup node
-      uses: actions/setup-node@v6
-      with:
-        node-version: 22
-    - name: Install deps
-      run: npm ci
-    - name: Run integrity check
-      continue-on-error: false
-      run: |
-        npm run test
+      - name: Checkout GH repository
+        uses: actions/checkout@v6
+      - name: setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install deps
+        run: npm ci
+      - name: Run integrity check
+        continue-on-error: false
+        run: |
+          npm run test
   check_publish:
     runs-on: ubuntu-latest
     steps:
@@ -61,7 +61,7 @@ jobs:
         run: |
           npm run test:publish
   publish:
-    needs: 
+    needs:
       - check_security
       - integrity
       - check_publish
@@ -77,7 +77,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: Install dependencies and Publish
+          # On laisse setup-node vide de toute configuration de registre
+
+      - name: Configure npm for Trusted Publisher and Publish
         run: |
           npm ci
           npm publish --provenance --access public
+        env:
+          # Ces 3 variables indiquent à npm d'utiliser le jeton OIDC de GitHub à la place d'un token classique
+          NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/"
+          NPM_CONFIG_AUTH_TYPE: "webauthn"
+          npm_config_@mlagie:registry: "https://registry.npmjs.org/"
