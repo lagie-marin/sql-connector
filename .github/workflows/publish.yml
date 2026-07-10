@@ -82,4 +82,4 @@ jobs:
       - name: Update npm and Publish
         run: |
           npm ci
-          npm publish
+          npm publish --provenance --access public
