@@ -67,25 +67,31 @@ jobs:
       - check_publish
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: sqlc
     permissions:
       contents: read
-      id-token: write # Indispensable pour l'échange de clés Trusted Publisher
+      packages: write
 
     steps:
-      - uses: actions/checkout@v6
+      # 1. Récupérer le code source du dépôt
+      - name: Checkout du code
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v6
+      # 2. Configurer Node.js et pointer vers le registre GitHub Packages
+      - name: Configurer Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "20" # Modifiez selon votre version de Node
+          registry-url: "https://npm.pkg.github.com"
+          # Définit la portée (scope) automatique, ex: @votre-nom-utilisateur
+          scope: "@${{ github.repository_owner }}"
 
-      - name: Install dependencies
+      # 3. Installer les dépendances du projet
+      - name: Installer les dépendances
         run: npm ci
 
-      - name: Publish Package via Trusted Publisher
+      # 4. Publier le package
+      # Le NODE_AUTH_TOKEN est automatiquement géré par l'action setup-node.
+      # GITHUB_TOKEN possède les droits suffisants grâce au bloc permissions ci-dessus.
+      - name: Publier sur GitHub Packages
         run: |
-          # On configure explicitement le protocole 'web' (OIDC) requis par npm
-          npm config set //registry.npmjs.org/:auth-type web
-
-          # On lance la publication
           npm publish --provenance --access public
