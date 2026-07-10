@@ -10,6 +10,9 @@ on:
   pull_request:
     branches:
       - main
+permissions:
+  contents: read
+  id-token: write
 jobs:
   check_security:
     runs-on: ubuntu-latest
@@ -33,21 +36,6 @@ jobs:
   integrity:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout GH repository
-      uses: actions/checkout@v6
-    - name: setup node
-      uses: actions/setup-node@v6
-      with:
-        node-version: 22
-    - name: Install deps
-      run: npm ci
-    - name: Run integrity check
-      continue-on-error: false
-      run: |
-        npm run test
-  check_publish:
-    runs-on: ubuntu-latest
-    steps:
       - name: Checkout GH repository
         uses: actions/checkout@v6
       - name: setup node
@@ -56,29 +44,24 @@ jobs:
           node-version: 22
       - name: Install deps
         run: npm ci
-      - name: Check if package can be published
+      - name: Run integrity check
         continue-on-error: false
         run: |
-          npm run test:publish
+          npm run test
   publish:
-    needs: 
+    needs:
       - check_security
       - integrity
-      - check_publish
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: sqlc
-    permissions:
-      contents: read
-      id-token: write
-
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false # never use caching in release builds
       - name: Update npm and Publish
         run: |
           npm ci
