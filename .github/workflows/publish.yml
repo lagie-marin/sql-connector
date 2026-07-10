@@ -84,7 +84,7 @@ jobs:
           node-version: "22" # Modifiez selon votre version de Node
           registry-url: "https://npm.pkg.github.com"
           # Définit la portée (scope) automatique, ex: @votre-nom-utilisateur
-          scope: "@${{ github.repository_owner }}"
+          scope: "@mlagie"
 
       # 3. Installer les dépendances du projet
       - name: Installer les dépendances
