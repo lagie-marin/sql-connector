@@ -70,21 +70,21 @@ jobs:
     environment: sqlc
     permissions:
       contents: read
-      id-token: write
+      id-token: write # Indispensable pour l'OIDC
 
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          # On laisse setup-node vide de toute configuration de registre
+          # Ne mettez surtout PAS de registry-url ici
 
-      - name: Configure npm for Trusted Publisher and Publish
+      - name: Prepare npm toolchain and Publish
         run: |
+          # Étape critique : npm 11+ est requis pour le flux Trusted Publisher natif
+          npm install -g npm@latest
+
+          # Installation et publication propre
           npm ci
           npm publish --provenance --access public
-        env:
-          # Ces 3 variables indiquent à npm d'utiliser le jeton OIDC de GitHub à la place d'un token classique
-          NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/"
-          NPM_CONFIG_AUTH_TYPE: "webauthn"
-          npm_config_@mlagie:registry: "https://registry.npmjs.org/"
