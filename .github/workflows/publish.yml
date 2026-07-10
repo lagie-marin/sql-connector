@@ -61,7 +61,7 @@ jobs:
         run: |
           npm run test:publish
   publish:
-    needs:
+    needs: 
       - check_security
       - integrity
       - check_publish
@@ -70,20 +70,20 @@ jobs:
     environment: sqlc
     permissions:
       contents: read
-      id-token: write # Indispensable pour l'OIDC
+      id-token: write # Requis par la doc d'npm pour générer le jeton OIDC
 
     steps:
       - uses: actions/checkout@v6
+      
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          # On ne configure aucun registre ici pour éviter les conflits de token
+          # STRICTEMENT SANS 'registry-url' ni 'scope' comme l'indique la doc
 
-      - name: Install dependencies and Publish via Trusted Publisher
+      - name: Install and Publish using Trusted Publisher
         run: |
-          # 1. On installe les dépendances avec l'npm local d'origine
+          # 1. Installer proprement vos dépendances avec l'environnement par défaut
           npm ci
           
-          # 2. On utilise 'npx' pour lancer la publication avec le dernier npm de manière isolée.
-          # L'option --auth-type=oidc indique explicitement à npm d'utiliser votre configuration Trusted Publisher.
-          npx --package=npm@latest npm publish --provenance --access public --auth-type=oidc
+          # 2. Publier via npx avec le client npm à jour requis par la documentation
+          npx --package=npm@latest npm publish --provenance --access public
