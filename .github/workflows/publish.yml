@@ -81,5 +81,6 @@ jobs:
           scope: "@mlagie"
       - name: Update npm and Publish
         run: |
+          npm install -g npm@latest
           npm ci
           npm publish --provenance --access public
