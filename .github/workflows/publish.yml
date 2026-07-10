@@ -79,8 +79,9 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           scope: "@mlagie"
-      - name: Update npm and Publish
+          
+      # Plus besoin de 'npm install -g npm@latest' ici !
+      - name: Install dependencies and Publish
         run: |
-          npm install -g npm@latest
           npm ci
           npm publish --provenance --access public
