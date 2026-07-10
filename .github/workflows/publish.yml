@@ -1,6 +1,7 @@
 name: Publish Package
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
   push:
@@ -64,7 +65,7 @@ jobs:
       - check_security
       - integrity
       - check_publish
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: sqlc
     permissions:
