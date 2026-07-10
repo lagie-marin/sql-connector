@@ -69,19 +69,16 @@ jobs:
     environment: sqlc
     permissions:
       contents: read
-      id-token: write # Indispensable pour Trusted Publisher
+      id-token: write
 
     steps:
       - uses: actions/checkout@v6
-      
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          # ATTENTION : On supprime totalement 'registry-url' et 'scope' ici
-          
+          registry-url: https://registry.npmjs.org
+          scope: "@mlagie"
       - name: Update npm and Publish
         run: |
-          npm install -g npm@10
           npm ci
-          # npm publish se débrouillera tout seul pour trouver le registre public et utiliser le token OIDC
           npm publish --provenance --access public
