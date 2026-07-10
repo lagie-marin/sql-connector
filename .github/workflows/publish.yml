@@ -70,18 +70,22 @@ jobs:
     environment: sqlc
     permissions:
       contents: read
-      id-token: write # Indispensable pour le flux Trusted Publisher (OIDC)
+      id-token: write # Indispensable pour l'échange de clés Trusted Publisher
 
     steps:
       - uses: actions/checkout@v6
 
-      # Utiliser Node 20 plutôt que Node 22 évite le bug interne d'npm lié à 'sigstore'
-      # tout en restant parfaitement compatible avec la publication et la provenance.
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
-          registry-url: "https://registry.npmjs.org"
+          node-version: 22
 
-      - name: Install dependencies and Publish
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish Package via Trusted Publisher
         run: |
-          npm publish --provenance --access public --auth-type=oidc
+          # On configure explicitement le protocole 'web' (OIDC) requis par npm
+          npm config set //registry.npmjs.org/:auth-type web
+
+          # On lance la publication
+          npm publish --provenance --access public
