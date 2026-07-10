@@ -74,17 +74,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          # Ne mettez surtout PAS de registry-url ici
+          # On ne configure aucun registre ici pour éviter les conflits de token
 
-      - name: Prepare npm toolchain and Publish
+      - name: Install dependencies and Publish via Trusted Publisher
         run: |
-          # Étape critique : npm 11+ est requis pour le flux Trusted Publisher natif
-          npm install -g npm@latest
-
-          # Installation et publication propre
+          # 1. On installe les dépendances avec l'npm local d'origine
           npm ci
-          npm publish --provenance --access public
+          
+          # 2. On utilise 'npx' pour lancer la publication avec le dernier npm de manière isolée.
+          # L'option --auth-type=oidc indique explicitement à npm d'utiliser votre configuration Trusted Publisher.
+          npx --package=npm@latest npm publish --provenance --access public --auth-type=oidc
