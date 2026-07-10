@@ -1,4 +1,4 @@
-const { buildSelect, buildQueryParts } = require('../src/utils/buildQuery');
+const { buildSelect, buildQueryParts } = require('../src/utils/buildQuery/buildQuery');
 
 describe('Utils - buildQuery.js', () => {
     describe('buildSelect', () => {
@@ -97,6 +97,56 @@ describe('Utils - buildQuery.js', () => {
 
             expect(parts).toContain('GROUP BY `status`, `email`');
         });
+
+        test("COUNT DISTINCT sur plusieurs colonnes", () => {
+            expect(
+                buildSelect([
+                    {
+                        count: ["truc", "bidule"],
+                        as: "total"
+                    }
+                ])
+            ).toBe("COUNT(`truc`) + COUNT(`bidule`) AS `total`");
+        });
+
+        test("COUNT conditionnel avec NULL", () => {
+            expect(
+                buildSelect([
+                    {
+                        count: {
+                            truc: null
+                        },
+                        as: "total"
+                    }
+                ])
+            ).toBe("COUNT(CASE WHEN `truc` = NULL THEN 1 END) AS `total`");
+        });
+
+        test("COUNT conditionnel avec NOT NULL", () => {
+            expect(
+                buildSelect([
+                    {
+                        count: {
+                            truc: "NOT NULL"
+                        },
+                        as: "total"
+                    }
+                ])
+            ).toBe("COUNT(CASE WHEN `truc` = 'NOT NULL' THEN 1 END) AS `total`");
+        });
+
+        test("COUNT refuse un nombre", () => {
+            expect(() =>
+                buildSelect([
+                    {
+                        count: 1515
+                    }
+                ])
+            ).toThrow(
+                "Invalid field type for COUNT. Must be a string, array, or object."
+            );
+        });
+
     });
 
     describe("buildQuery - buildGroupByItem", () => {
@@ -135,7 +185,7 @@ describe('Utils - buildQuery.js', () => {
     test("count simple", () => {
         expect(
             buildSelect([
-                {  count: "id"}
+                { count: "id" }
             ])
         ).toBe("COUNT(`id`)");
     });
